@@ -131,7 +131,7 @@ PRAVIA`;
 
     const year = new Date().getFullYear();
     const cotizacion = await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion-folio:${year}`}))`);
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion-folio:${year}`}))`);
       const yearlyFolios = await tx.cotizacion.findMany({
         where: {
           created_at: {
@@ -193,7 +193,7 @@ export const updateCotizacionEstado = async (req: Request, res: Response) => {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion-state:${id}`}))`);
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion-state:${id}`}))`);
       const current = await tx.cotizacion.findUnique({
         where: { id },
         include: { versiones: { select: { aprobada: true } } },
@@ -274,7 +274,7 @@ export const createCotizacionVersion = async (req: Request, res: Response) => {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion-version:${id}`}))`);
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion-version:${id}`}))`);
       const cotizacion = await tx.cotizacion.findUnique({ where: { id } });
       if (!cotizacion) {
         throw new CotizacionBusinessError('Cotización no encontrada.', 'COTIZACION_NOT_FOUND', 404);
@@ -360,7 +360,7 @@ export const aprobarVersion = async (req: Request, res: Response) => {
     if (!target) return res.status(404).json({ error: 'Versión de cotización no encontrada.' });
 
     const result = await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion-version:${target.cotizacion_id}`}))`);
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion-version:${target.cotizacion_id}`}))`);
       const version = await tx.cotizacionVersion.findUnique({ where: { id: versionId } });
       if (!version) {
         throw new CotizacionBusinessError('Versión de cotización no encontrada.', 'QUOTE_VERSION_NOT_FOUND', 404);

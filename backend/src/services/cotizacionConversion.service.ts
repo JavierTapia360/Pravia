@@ -27,7 +27,7 @@ export class CotizacionConversionService {
     const correlationId = input.correlationId || crypto.randomUUID();
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion:${input.cotizacionId}`}))`);
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion:${input.cotizacionId}`}))`);
 
       const cotizacion = await tx.cotizacion.findUnique({
         where: { id: input.cotizacionId },
@@ -84,7 +84,7 @@ export class CotizacionConversionService {
       ]);
 
       const year = new Date().getFullYear();
-      await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:expediente-folio:${year}`}))`);
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:expediente-folio:${year}`}))`);
       const yearlyFolios = await tx.expediente.findMany({
         where: { numero_pravia: { startsWith: `EXP-${year}-` } },
         select: { numero_pravia: true },

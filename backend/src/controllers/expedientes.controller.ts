@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { ExpedienteEstatus, TipoMovimiento, NaturalezaMovimiento, DocEstatus } from '@prisma/client';
+import { ExpedienteEstatus, TipoMovimiento, NaturalezaMovimiento, DocEstatus, Prisma } from '@prisma/client';
 import { ExpedienteWorkflowService } from '../services/expedienteWorkflow.service';
 import { calculateExpedienteProgress } from '../services/expedienteProgress.service';
 import { downloadFile, uploadFile, deleteFile } from '../services/supabase.service';
@@ -10,6 +10,16 @@ import { CotizacionConversionService } from '../services/cotizacionConversion.se
 import { CotizacionBusinessError } from '../domain/cotizacionWorkflow';
 
 const cotizacionConversionService = new CotizacionConversionService(prisma);
+
+class ExpedienteUpdateError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly status = 400,
+  ) {
+    super(message);
+  }
+}
 
 // 1. Listar Expedientes con Filtros y Paginación
 export const getExpedientes = async (req: Request, res: Response) => {
@@ -524,116 +534,162 @@ export const updateExpedienteHeader = async (req: Request, res: Response) => {
       notaria_id,
       numero_escritura,
       budget_items,
-      honorarios_pravia
+      honorarios_pravia,
+      version: expectedVersion,
+      user_id,
     } = req.body;
-    
-    const cleanAbogadoId = (abogado_id && String(abogado_id).trim() !== '') ? abogado_id : undefined;
-    const cleanNotariaId = (notaria_id && String(notaria_id).trim() !== '') ? notaria_id : null;
-    let cleanTipoActoId = (tipo_acto_id && String(tipo_acto_id).trim() !== '') ? tipo_acto_id : undefined;
+    const cleanAlias = cliente_alias === undefined ? undefined : String(cliente_alias).trim();
+    const cleanAbogadoId = abogado_id === undefined ? undefined : String(abogado_id).trim();
+    const cleanNotariaId = notaria_id === undefined ? undefined : (notaria_id ? String(notaria_id).trim() : null);
+    const cleanNumeroEscritura = numero_escritura === undefined ? undefined : String(numero_escritura).trim();
 
-    if (!cleanTipoActoId && tipo_acto_nombre) {
-      const matchingTipo = await prisma.tipoActo.findFirst({
-        where: { nombre: { equals: String(tipo_acto_nombre).trim(), mode: 'insensitive' } }
-      });
-      if (matchingTipo) cleanTipoActoId = matchingTipo.id;
+    if (cleanAlias !== undefined && cleanAlias.length === 0) {
+      throw new ExpedienteUpdateError('El alias o identificación del expediente no puede quedar vacío.', 'EXPEDIENTE_ALIAS_REQUIRED');
     }
-    
-    let userId = (req as any).user?.id || cleanAbogadoId;
-    if (!userId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) userId = defaultUser.id;
+    if (cleanAbogadoId !== undefined && cleanAbogadoId.length === 0) {
+      throw new ExpedienteUpdateError('Selecciona un abogado activo para el expediente.', 'EXPEDIENTE_LAWYER_REQUIRED');
     }
 
-    const currentExp = await prisma.expediente.findUnique({ where: { id } });
-    if (!currentExp) return res.status(404).json({ error: 'Expediente no encontrado' });
-
-    const currentDatos = (currentExp.datos_operacion as any) || {};
-    const newDatos = { ...currentDatos };
-
-    if (numero_escritura !== undefined) {
-      newDatos.numero_escritura = numero_escritura;
+    const validatedBudget = Array.isArray(budget_items)
+      ? budget_items.map((item: any, index: number) => {
+          const concepto = String(item?.concepto || '').trim();
+          const monto = Number(item?.monto);
+          if (!concepto) {
+            throw new ExpedienteUpdateError(`El rubro ${index + 1} requiere un nombre.`, 'INVALID_BUDGET_ITEM');
+          }
+          if (!Number.isFinite(monto) || monto < 0) {
+            throw new ExpedienteUpdateError(`El monto de "${concepto}" debe ser un número mayor o igual a cero.`, 'INVALID_BUDGET_AMOUNT');
+          }
+          return { id: item?.id || `rubro_${index + 1}`, concepto, monto };
+        })
+      : undefined;
+    const praviaAmount = honorarios_pravia === undefined ? undefined : Number(honorarios_pravia);
+    if (praviaAmount !== undefined && (!Number.isFinite(praviaAmount) || praviaAmount < 0)) {
+      throw new ExpedienteUpdateError('La participación PRAVIA debe ser un importe válido mayor o igual a cero.', 'INVALID_PRAVIA_AMOUNT');
     }
-
-    let calculatedTotalCliente: number | undefined = undefined;
-
-    if (Array.isArray(budget_items)) {
-      const totalNotaria = budget_items.reduce((sum: number, r: any) => sum + Number(r.monto || 0), 0);
-      const totalPravia = Number(honorarios_pravia || 0);
-      calculatedTotalCliente = totalNotaria + totalPravia;
-
-      newDatos.presupuesto = {
-        rubros: budget_items,
-        honorarios_pravia: totalPravia,
-        total_notaria: totalNotaria,
-        total_cliente: calculatedTotalCliente
-      };
-
-      if (currentExp.cotizacion_id) {
-        const cot = await prisma.cotizacion.findUnique({
-          where: { id: currentExp.cotizacion_id },
-          include: { versiones: { orderBy: { version: 'desc' } } }
-        });
-        if (cot && cot.versiones && cot.versiones.length > 0) {
-          const latestVer = cot.versiones[0];
-          await prisma.cotizacionVersion.update({
-            where: { id: latestVer.id },
-            data: {
-              desglose_notaria: { rubros: budget_items },
-              honorarios_pravia: totalPravia,
-              total_notaria: totalNotaria,
-              total_cliente: calculatedTotalCliente
-            }
-          });
-          await prisma.cotizacion.update({
-            where: { id: cot.id },
-            data: {
-              total_notaria: totalNotaria,
-              honorarios_pravia: totalPravia,
-              total_cliente: calculatedTotalCliente
-            }
-          });
-        }
-      }
-    }
-
-    const changes: string[] = [];
-    if (cliente_alias && cliente_alias !== currentExp.cliente_alias) changes.push(`Nombre de Identificación: "${currentExp.cliente_alias}" → "${cliente_alias}"`);
-    if (cleanTipoActoId && cleanTipoActoId !== currentExp.tipo_acto_id) changes.push(`Tipo de Acto modificado`);
-    if (cleanAbogadoId && cleanAbogadoId !== currentExp.abogado_id) changes.push(`Abogado Encargado reasignado`);
-    if (cleanNotariaId !== currentExp.notaria_id) changes.push(`Notaría modificada`);
-    if (numero_escritura !== undefined) changes.push(`Número de Escritura actualizado`);
-    if (Array.isArray(budget_items)) changes.push(`Presupuesto Operativo actualizado`);
 
     const updated = await prisma.$transaction(async (tx) => {
-      const exp = await tx.expediente.update({
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:expediente-update:${id}`}))`);
+      const currentExp = await tx.expediente.findUnique({ where: { id } });
+      if (!currentExp) throw new ExpedienteUpdateError('Expediente no encontrado.', 'EXPEDIENTE_NOT_FOUND', 404);
+      if (expectedVersion !== undefined && Number(expectedVersion) !== currentExp.version) {
+        throw new ExpedienteUpdateError(
+          'El expediente cambió en otra sesión. Recarga la información antes de volver a guardar.',
+          'EXPEDIENTE_VERSION_CONFLICT',
+          409,
+        );
+      }
+
+      let cleanTipoActoId = tipo_acto_id ? String(tipo_acto_id).trim() : undefined;
+      if (!cleanTipoActoId && tipo_acto_nombre !== undefined) {
+        const matchingTipo = await tx.tipoActo.findFirst({
+          where: { activo: true, nombre: { equals: String(tipo_acto_nombre).trim(), mode: 'insensitive' } },
+        });
+        if (!matchingTipo) {
+          throw new ExpedienteUpdateError('El tipo de acto seleccionado no existe o está inactivo.', 'EXPEDIENTE_ACT_TYPE_INVALID');
+        }
+        cleanTipoActoId = matchingTipo.id;
+      }
+      if (cleanTipoActoId) {
+        const validType = await tx.tipoActo.findFirst({ where: { id: cleanTipoActoId, activo: true }, select: { id: true } });
+        if (!validType) throw new ExpedienteUpdateError('El tipo de acto seleccionado no existe o está inactivo.', 'EXPEDIENTE_ACT_TYPE_INVALID');
+      }
+      if (cleanAbogadoId !== undefined) {
+        const lawyer = await tx.user.findFirst({ where: { id: cleanAbogadoId, activo: true }, select: { id: true } });
+        if (!lawyer) throw new ExpedienteUpdateError('El abogado seleccionado no existe o está inactivo.', 'EXPEDIENTE_LAWYER_INVALID');
+      }
+      if (cleanNotariaId) {
+        const notary = await tx.notaria.findFirst({ where: { id: cleanNotariaId, activa: true }, select: { id: true } });
+        if (!notary) throw new ExpedienteUpdateError('La notaría seleccionada no existe o está inactiva.', 'EXPEDIENTE_NOTARY_INVALID');
+      }
+
+      const actorId = (req as any).user?.id || user_id || cleanAbogadoId || currentExp.abogado_id;
+      const actor = await tx.user.findFirst({ where: { id: actorId, activo: true }, select: { id: true } });
+      if (!actor) throw new ExpedienteUpdateError('No existe un usuario activo para registrar el cambio.', 'EXPEDIENTE_ACTOR_INVALID', 403);
+
+      const currentDatos = (currentExp.datos_operacion as Record<string, any> | null) || {};
+      const newDatos: Record<string, any> = { ...currentDatos };
+      if (cleanNumeroEscritura !== undefined) newDatos.numero_escritura = cleanNumeroEscritura || null;
+
+      if (validatedBudget !== undefined) {
+        const totalNotaria = validatedBudget.reduce((sum, item) => sum + item.monto, 0);
+        const totalPravia = praviaAmount ?? Number((currentDatos.presupuesto as any)?.honorarios_pravia || 0);
+        if (totalNotaria > 0 && totalPravia > totalNotaria) {
+          throw new ExpedienteUpdateError(
+            'La participación PRAVIA no puede exceder el presupuesto notarial.',
+            'PRAVIA_AMOUNT_EXCEEDS_BUDGET',
+          );
+        }
+        newDatos.presupuesto = {
+          rubros: validatedBudget,
+          honorarios_pravia: totalPravia,
+          total_notaria: totalNotaria,
+          total_cliente: totalNotaria,
+        };
+      } else if (praviaAmount !== undefined) {
+        const currentBudget = (currentDatos.presupuesto as any) || {};
+        const totalNotaria = Number(currentBudget.total_notaria || 0);
+        if (totalNotaria > 0 && praviaAmount > totalNotaria) {
+          throw new ExpedienteUpdateError(
+            'La participación PRAVIA no puede exceder el presupuesto notarial.',
+            'PRAVIA_AMOUNT_EXCEEDS_BUDGET',
+          );
+        }
+        newDatos.presupuesto = { ...currentBudget, honorarios_pravia: praviaAmount, total_cliente: totalNotaria };
+      }
+
+      const changes: string[] = [];
+      if (cleanAlias !== undefined && cleanAlias !== currentExp.cliente_alias) changes.push('Alias o identificación');
+      if (cleanTipoActoId && cleanTipoActoId !== currentExp.tipo_acto_id) changes.push('Tipo de acto');
+      if (cleanAbogadoId !== undefined && cleanAbogadoId !== currentExp.abogado_id) changes.push('Abogado encargado');
+      if (cleanNotariaId !== undefined && cleanNotariaId !== currentExp.notaria_id) changes.push('Notaría');
+      if (cleanNumeroEscritura !== undefined && cleanNumeroEscritura !== (currentExp.numero_notaria || '')) changes.push('Número de escritura');
+      if (validatedBudget !== undefined || praviaAmount !== undefined) changes.push('Presupuesto operativo');
+
+      const expediente = await tx.expediente.update({
         where: { id },
         data: {
-          cliente_alias: cliente_alias || undefined,
+          cliente_alias: cleanAlias,
           tipo_acto_id: cleanTipoActoId,
           abogado_id: cleanAbogadoId,
           notaria_id: cleanNotariaId,
-          valor_operacion: calculatedTotalCliente ?? undefined,
-          datos_operacion: newDatos
-        }
+          numero_notaria: cleanNumeroEscritura === undefined ? undefined : (cleanNumeroEscritura || null),
+          datos_operacion: newDatos,
+          version: { increment: 1 },
+        },
       });
 
-      if (changes.length > 0 && userId) {
+      if (changes.length > 0) {
+        const correlationId = (req as any).correlationId || crypto.randomUUID();
         await tx.expedienteActividad.create({
           data: {
             expediente_id: id,
             tipo: 'AUDITORIA',
-            titulo: 'Ficha General y Presupuesto del Expediente Modificados',
-            descripcion: changes.join('; '),
-            usuario_id: userId
-          }
+            titulo: 'Ficha general y presupuesto actualizados',
+            descripcion: changes.join(', '),
+            usuario_id: actor.id,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            user_id: actor.id,
+            accion: 'UPDATE_HEADER_AND_BUDGET',
+            entidad: 'Expediente',
+            entidad_id: id,
+            valores_anteriores: { version: currentExp.version },
+            valores_nuevos: { version: expediente.version, campos: changes },
+            correlation_id: correlationId,
+          },
         });
       }
-
-      return exp;
+      return expediente;
     });
 
     res.json(updated);
   } catch (error: any) {
+    if (error instanceof ExpedienteUpdateError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
     res.status(500).json({ error: 'Error al actualizar expediente', detail: error.message });
   }
 };

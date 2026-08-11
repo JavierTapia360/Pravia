@@ -160,6 +160,20 @@ app.post('/api/auth/login', (_req: Request, res: Response) => {
   });
 });
 
+// Catálogo operativo mínimo. No expone contraseñas ni atributos de autenticación.
+app.get('/api/users', async (_req: Request, res: Response) => {
+  try {
+    const users = await prisma.user.findMany({
+      where: { activo: true },
+      select: { id: true, nombre: true, apellido: true, email: true, rol: true },
+      orderBy: [{ nombre: 'asc' }, { apellido: 'asc' }],
+    });
+    res.json(users);
+  } catch (error: any) {
+    res.status(500).json({ error: 'No fue posible cargar el catálogo de usuarios.', detail: error.message });
+  }
+});
+
 // ══════════════════════════════════════
 // Feature Routes
 // ══════════════════════════════════════
