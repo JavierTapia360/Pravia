@@ -5,7 +5,7 @@ import {
   createNotaria,
   updateNotaria,
   setNotariaPredeterminada,
-  deleteNotaria
+  archiveNotaria
 } from '../controllers/notarias.controller';
 
 const router = express.Router();
@@ -15,6 +15,6 @@ router.get('/:id', getNotariaById);
 router.post('/', createNotaria);
 router.put('/:id', updateNotaria);
 router.patch('/:id/predeterminada', setNotariaPredeterminada);
-router.delete('/:id', deleteNotaria);
+router.patch('/:id/archivar', archiveNotaria);
 
 export default router;
