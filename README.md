@@ -26,15 +26,20 @@ Backend:
 ```text
 npm run build
 npm test
+npm run test:integration
 npm run db:verify
 npm run storage:verify
+npm run eval:ai
+npm run check:secrets
 ```
 
 Frontend:
 
 ```text
 npm run build
+npm run check:bundle
 npm run check:pwa
+npm run e2e:smoke
 ```
 
 ## Infraestructura
@@ -50,3 +55,9 @@ npm run check:pwa
 - La IA propone y explica; una persona confirma los datos y decisiones jurídicas/fiscales.
 
 La matriz y el procedimiento completos están en [autenticación, RBAC y RLS](docs/seguridad/fase-10-auth-rbac-rls.md).
+
+## Producción
+
+La imagen del backend, la imagen PWA/Nginx y una composición cloud de referencia están incluidas. Las migraciones se ejecutan como paso de mantenimiento explícito y nunca mediante `db push`. Consulta [calidad y gates de Fase 13](docs/calidad/fase-13-testing-produccion.md), [el runbook de despliegue](docs/operacion/despliegue-produccion.md) y [la matriz de cierre](docs/auditoria/matriz-cierre-prompt-maestro.md).
+
+El recorrido E2E mutante se niega a usar la base actual: solo se habilita con `E2E_ALLOW_MUTATIONS=isolated-database-confirmed` en localhost o una rama efímera declarada.
