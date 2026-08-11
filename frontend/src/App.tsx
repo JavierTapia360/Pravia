@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import MainLayout from './components/layout/MainLayout';
+import { EmptyState, LoadingState } from './components/ui/AsyncState';
+import { BarChart3, BrainCircuit, Calendar, ShieldAlert } from 'lucide-react';
 
 const MiDia = lazy(() => import('./pages/MiDia'));
 const Prospectos = lazy(() => import('./pages/Prospectos'));
@@ -41,6 +43,14 @@ const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
   return children;
 };
 
+function ModulePlaceholder({ title, description, icon }: { title: string; description: string; icon: typeof Calendar }) {
+  return (
+    <div style={{ maxWidth: '960px', margin: '0 auto' }}>
+      <EmptyState title={title} description={description} icon={icon} />
+    </div>
+  );
+}
+
 import { ToastContainer } from './components/ui/ToastContainer';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 
@@ -48,7 +58,7 @@ function App() {
   return (
     <ErrorBoundary>
       <BrowserRouter>
-        <Suspense fallback={<div className="min-h-screen bg-dark-bg p-8 text-sm text-muted">Cargando módulo...</div>}>
+        <Suspense fallback={<div style={{ padding: 'var(--space-6)' }}><LoadingState label="Cargando módulo" rows={4} /></div>}>
           <Routes>
           <Route path="/login" element={<Login />} />
           
@@ -73,10 +83,10 @@ function App() {
             <Route path="comparecientes/nuevo" element={<ComparecienteNuevo />} />
             <Route path="comparecientes/:id" element={<ComparecienteDetail />} />
             <Route path="finanzas" element={<Finanzas />} />
-            <Route path="agenda" element={<div className="p-8"><h1>Agenda</h1></div>} />
-            <Route path="reportes" element={<div className="p-8"><h1>Reportes</h1></div>} />
-            <Route path="inteligencia" element={<div className="p-8"><h1>Inteligencia Operativa</h1></div>} />
-            <Route path="riesgos" element={<div className="p-8"><h1>Centro de Riesgos</h1></div>} />
+            <Route path="agenda" element={<ModulePlaceholder title="Agenda operativa" description="Este módulo integrará citas, firmas, vencimientos y recordatorios. La ruta está reservada y se completará en la fase de agenda y Mi Día." icon={Calendar} />} />
+            <Route path="reportes" element={<ModulePlaceholder title="Reportes operativos" description="Los indicadores se conectarán a datos reales una vez estabilizados los flujos principales y financieros." icon={BarChart3} />} />
+            <Route path="inteligencia" element={<ModulePlaceholder title="Inteligencia operativa" description="La asistencia documental se publicará aquí con trazabilidad, métricas de uso y escalamiento controlado de modelo." icon={BrainCircuit} />} />
+            <Route path="riesgos" element={<ModulePlaceholder title="Riesgos y cumplimiento" description="El centro UIF e ISR se habilitará con reglas verificables, alertas explicables y permisos por rol." icon={ShieldAlert} />} />
           </Route>
           </Routes>
         </Suspense>

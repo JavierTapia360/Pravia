@@ -89,21 +89,21 @@ export function DataTable<T>({
               {columns.map((col, i) => (
                 <th 
                   key={i} 
+                  scope="col"
+                  aria-sort={sortKey === col.accessorKey ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}
                   style={{ 
                     padding: 'var(--space-3) var(--space-4)', 
                     fontWeight: 500, 
                     color: 'var(--text-secondary)',
                     fontSize: '0.85rem',
-                    cursor: col.sortable && col.accessorKey ? 'pointer' : 'default',
                     whiteSpace: 'nowrap'
                   }}
-                  onClick={() => col.sortable && col.accessorKey && handleSort(col.accessorKey)}
-                  className={col.sortable && col.accessorKey ? 'hover-bg-tertiary' : ''}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    {col.header}
-                    {col.sortable && <ArrowUpDown size={14} className="text-muted" />}
-                  </div>
+                  {col.sortable && col.accessorKey ? (
+                    <button type="button" className="table-sort-button" onClick={() => handleSort(col.accessorKey)} aria-label={`Ordenar por ${col.header}`}>
+                      {col.header}<ArrowUpDown size={14} className="text-muted" aria-hidden="true" />
+                    </button>
+                  ) : col.header}
                 </th>
               ))}
             </tr>
@@ -125,6 +125,14 @@ export function DataTable<T>({
                   }}
                   className={onRowClick ? 'hover-bg-tertiary' : ''}
                   onClick={() => onRowClick && onRowClick(row)}
+                  onKeyDown={(event) => {
+                    if (onRowClick && (event.key === 'Enter' || event.key === ' ')) {
+                      event.preventDefault();
+                      onRowClick(row);
+                    }
+                  }}
+                  tabIndex={onRowClick ? 0 : undefined}
+                  aria-label={onRowClick ? 'Abrir registro' : undefined}
                 >
                   {columns.map((col, colIndex) => (
                     <td key={colIndex} style={{ padding: 'var(--space-3) var(--space-4)', fontSize: '0.9rem' }}>
@@ -152,9 +160,11 @@ export function DataTable<T>({
         </div>
         <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
           <button 
+            type="button"
             className="btn-icon" 
             disabled={currentPage === 1}
             onClick={() => setCurrentPage(p => p - 1)}
+            aria-label="Página anterior"
           >
             <ChevronLeft size={18} />
           </button>
@@ -162,9 +172,11 @@ export function DataTable<T>({
             {currentPage} / {totalPages}
           </span>
           <button 
+            type="button"
             className="btn-icon" 
             disabled={currentPage === totalPages}
             onClick={() => setCurrentPage(p => p + 1)}
+            aria-label="Página siguiente"
           >
             <ChevronRight size={18} />
           </button>

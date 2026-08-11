@@ -1,156 +1,203 @@
-import { NavLink, Outlet } from 'react-router-dom';
-import { 
-  Home, Users, FileText, FolderOpen, Building2,
-  UserSquare2, Files, Wallet, Calendar, 
-  BarChart3, BrainCircuit, AlertTriangle, Settings, Search, Bell, Menu
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import {
+  AlertTriangle,
+  Bell,
+  ChevronLeft,
+  ChevronRight,
+  LogOut,
+  Menu,
+  Search,
+  X,
 } from 'lucide-react';
 import { useAuthStore } from '../../App';
-import { useState } from 'react';
+import { isAppRole, navigationForRole, roleLabels } from '../../config/navigation';
+import type { AppRole } from '../../config/navigation';
 
 export default function MainLayout() {
   const { user, logout } = useAuthStore();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const searchRef = useRef<HTMLInputElement>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
 
-  const navItems = [
-    { to: "/mi-dia", icon: <Home size={20} />, label: "Mi Día" },
-    { to: "/prospectos", icon: <Users size={20} />, label: "Prospectos" },
-    { to: "/cotizaciones", icon: <FileText size={20} />, label: "Cotizaciones" },
-    { to: "/expedientes", icon: <FolderOpen size={20} />, label: "Expedientes" },
-    { to: "/notarias", icon: <Building2 size={20} />, label: "Notarías" },
-    { to: "/comparecientes", icon: <UserSquare2 size={20} />, label: "Comparecientes" },
-    { to: "/finanzas", icon: <Wallet size={20} />, label: "Finanzas" },
-    { to: "/agenda", icon: <Calendar size={20} />, label: "Agenda" },
-    { to: "/reportes", icon: <BarChart3 size={20} />, label: "Reportes" },
-    { to: "/inteligencia", icon: <BrainCircuit size={20} />, label: "Inteligencia" },
-    { to: "/riesgos", icon: <AlertTriangle size={20} />, label: "Riesgos" },
-  ];
+  const navigation = useMemo(() => navigationForRole(user?.rol), [user?.rol]);
+  const searchableItems = useMemo(() => navigation.flatMap((group) => group.items), [navigation]);
+  const normalizedQuery = searchQuery.trim().toLocaleLowerCase('es-MX');
+  const searchResults = normalizedQuery
+    ? searchableItems.filter((item) => `${item.label} ${item.description}`.toLocaleLowerCase('es-MX').includes(normalizedQuery)).slice(0, 6)
+    : searchableItems.slice(0, 5);
+  const currentItem = [...searchableItems]
+    .sort((a, b) => b.to.length - a.to.length)
+    .find((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`));
+  const currentGroup = navigation.find((group) => group.items.some((item) => item.to === currentItem?.to));
+  const rawUserRole: unknown = user?.rol;
+  const userRole: AppRole = isAppRole(rawUserRole) ? rawUserRole : 'RECEPCION';
+  const userInitial = user?.nombre?.trim()?.charAt(0).toLocaleUpperCase('es-MX') || 'U';
+
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+    setSearchOpen(false);
+    setSearchQuery('');
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'k') {
+        event.preventDefault();
+        setSearchOpen(true);
+        window.setTimeout(() => searchRef.current?.focus(), 0);
+      }
+      if (event.key === 'Escape') {
+        setSearchOpen(false);
+        setMobileSidebarOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const selectSearchResult = (to: string) => {
+    navigate(to);
+    setSearchOpen(false);
+    setSearchQuery('');
+  };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      
-      {/* SIDEBAR */}
-      <aside 
-        className="glass-panel" 
-        style={{ 
-          width: sidebarCollapsed ? '72px' : '260px',
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          transition: 'width 0.3s ease',
-          borderRadius: 0,
-          borderRight: '1px solid var(--border-color)',
-          borderTop: 'none', borderBottom: 'none', borderLeft: 'none',
-          zIndex: 10
-        }}
-      >
-        <div style={{ padding: 'var(--space-4)', display: 'flex', alignItems: 'center', justifyContent: sidebarCollapsed ? 'center' : 'space-between', borderBottom: '1px solid var(--border-color)' }}>
-          {!sidebarCollapsed && (
-            <h1 style={{ fontSize: '1.5rem', margin: 0 }}>PRAVIA <span style={{ color: 'var(--color-primary)' }}>OS</span></h1>
-          )}
-          <button className="btn-icon" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>
-            <Menu size={20} />
+    <div className={`app-shell${sidebarCollapsed ? ' app-shell--collapsed' : ''}`}>
+      <a className="skip-link" href="#main-content">Saltar al contenido</a>
+
+      {mobileSidebarOpen && (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          aria-label="Cerrar navegación"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+
+      <aside className={`app-sidebar${mobileSidebarOpen ? ' app-sidebar--mobile-open' : ''}`} aria-label="Navegación principal">
+        <div className="sidebar-brand">
+          <NavLink to="/mi-dia" className="brand-mark" aria-label="PRAVIA OS, ir a Mi Día">
+            <span className="brand-symbol" aria-hidden="true">P</span>
+            <span className="brand-copy">
+              <strong>PRAVIA</strong>
+              <small>OPERATIONS SYSTEM</small>
+            </span>
+          </NavLink>
+          <button type="button" className="icon-button sidebar-mobile-close" onClick={() => setMobileSidebarOpen(false)} aria-label="Cerrar navegación">
+            <X size={19} />
           </button>
         </div>
 
-        <nav style={{ flex: 1, padding: 'var(--space-4) 0', overflowY: 'auto' }}>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {navItems.map((item) => (
-              <li key={item.to} style={{ margin: '0 var(--space-2) var(--space-1) var(--space-2)' }}>
-                <NavLink 
-                  to={item.to}
-                  style={({ isActive }) => ({
-                    display: 'flex',
-                    alignItems: 'center',
-                    padding: 'var(--space-3) var(--space-4)',
-                    borderRadius: 'var(--radius-md)',
-                    color: isActive ? 'white' : 'var(--text-secondary)',
-                    backgroundColor: isActive ? 'var(--color-primary)' : 'transparent',
-                    textDecoration: 'none',
-                    fontWeight: 500,
-                    transition: 'all 0.2s',
-                    justifyContent: sidebarCollapsed ? 'center' : 'flex-start'
-                  })}
-                >
-                  <span style={{ display: 'flex', alignItems: 'center' }}>{item.icon}</span>
-                  {!sidebarCollapsed && <span style={{ marginLeft: 'var(--space-3)' }}>{item.label}</span>}
-                </NavLink>
-              </li>
-            ))}
-          </ul>
+        <nav className="sidebar-navigation">
+          {navigation.map((group) => (
+            <section className="nav-group" key={group.label} aria-labelledby={`nav-${group.label}`}>
+              <h2 id={`nav-${group.label}`} className="nav-group-label">{group.label}</h2>
+              <ul>
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <li key={item.to}>
+                      <NavLink
+                        to={item.to}
+                        className={({ isActive }) => `nav-item${isActive ? ' nav-item--active' : ''}`}
+                        title={sidebarCollapsed ? item.label : undefined}
+                      >
+                        <Icon size={19} strokeWidth={1.8} aria-hidden="true" />
+                        <span>{item.label}</span>
+                      </NavLink>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
         </nav>
 
-        <div style={{ padding: 'var(--space-4)', borderTop: '1px solid var(--border-color)' }}>
-          <button className="btn btn-secondary" style={{ width: '100%', justifyContent: sidebarCollapsed ? 'center' : 'flex-start' }} onClick={logout}>
-            <Settings size={20} />
-            {!sidebarCollapsed && <span>Cerrar sesión</span>}
+        <div className="sidebar-footer">
+          <div className="sidebar-user">
+            <span className="user-avatar" aria-hidden="true">{userInitial}</span>
+            <span className="sidebar-user-copy">
+              <strong>{user?.nombre || 'Usuario'}</strong>
+              <small>{roleLabels[userRole]}</small>
+            </span>
+            <button type="button" className="icon-button" onClick={logout} aria-label="Cerrar sesión" title="Cerrar sesión">
+              <LogOut size={18} />
+            </button>
+          </div>
+          <button
+            type="button"
+            className="sidebar-collapse"
+            onClick={() => setSidebarCollapsed((value) => !value)}
+            aria-label={sidebarCollapsed ? 'Expandir navegación' : 'Contraer navegación'}
+            aria-expanded={!sidebarCollapsed}
+          >
+            {sidebarCollapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+            <span>{sidebarCollapsed ? 'Expandir' : 'Contraer navegación'}</span>
           </button>
         </div>
       </aside>
 
-      {/* MAIN CONTENT AREA */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        
-        {/* HEADER */}
-        <header 
-          className="glass-panel"
-          style={{ 
-            height: '72px', 
-            borderRadius: 0,
-            borderBottom: '1px solid var(--border-color)',
-            borderTop: 'none', borderLeft: 'none', borderRight: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '0 var(--space-6)',
-            zIndex: 5
-          }}
-        >
-          {/* Search */}
-          <div style={{ position: 'relative', width: '300px' }}>
-            <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-            <input 
-              type="text" 
-              placeholder="Buscar expedientes, clientes..." 
-              className="input-field"
-              style={{ paddingLeft: '40px', borderRadius: 'var(--radius-xl)', background: 'var(--bg-tertiary)' }}
-            />
+      <div className="app-workspace">
+        <header className="app-topbar">
+          <div className="topbar-context">
+            <button type="button" className="icon-button topbar-menu" onClick={() => setMobileSidebarOpen(true)} aria-label="Abrir navegación">
+              <Menu size={20} />
+            </button>
+            <div className="page-context">
+              <span>{currentGroup?.label || 'PRAVIA OS'}</span>
+              <strong>{currentItem?.label || 'Módulo operativo'}</strong>
+            </div>
           </div>
 
-          {/* Actions & User */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
-            <button className="btn-icon" style={{ position: 'relative' }}>
-              <AlertTriangle size={20} color="var(--color-warning)" />
-              <span style={{ position: 'absolute', top: 0, right: 0, width: 8, height: 8, background: 'var(--color-danger)', borderRadius: '50%' }}></span>
-            </button>
-            <button className="btn-icon" style={{ position: 'relative' }}>
-              <Bell size={20} />
-            </button>
-            
-            <div style={{ width: '1px', height: '24px', background: 'var(--border-color)' }}></div>
-            
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-              <div style={{ 
-                width: 36, height: 36, 
-                borderRadius: '50%', 
-                background: 'var(--color-primary-dark)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontWeight: 'bold', fontSize: '1rem'
-              }}>
-                {user?.nombre?.charAt(0).toUpperCase() || 'U'}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>{user?.nombre || 'Usuario'}</span>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{user?.rol || 'Rol'}</span>
-              </div>
+          <div className="topbar-actions">
+            <div className="module-search">
+              <Search size={17} aria-hidden="true" />
+              <input
+                ref={searchRef}
+                type="search"
+                value={searchQuery}
+                placeholder="Ir a un módulo…"
+                aria-label="Buscar módulo"
+                aria-expanded={searchOpen}
+                aria-controls="module-search-results"
+                onFocus={() => setSearchOpen(true)}
+                onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true); }}
+              />
+              <kbd>⌘ K</kbd>
+              {searchOpen && (
+                <div className="module-search-results" id="module-search-results" role="listbox">
+                  <div className="module-search-heading">Navegación rápida</div>
+                  {searchResults.length ? searchResults.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <button type="button" role="option" aria-selected="false" key={item.to} onMouseDown={(event) => event.preventDefault()} onClick={() => selectSearchResult(item.to)}>
+                        <span className="search-result-icon"><Icon size={17} /></span>
+                        <span><strong>{item.label}</strong><small>{item.description}</small></span>
+                      </button>
+                    );
+                  }) : <p className="module-search-empty">No hay módulos que coincidan.</p>}
+                </div>
+              )}
             </div>
+            <button type="button" className="icon-button" onClick={() => navigate('/riesgos')} aria-label="Abrir riesgos y cumplimiento" title="Riesgos y cumplimiento">
+              <AlertTriangle size={19} />
+              <span className="attention-dot" aria-hidden="true" />
+            </button>
+            <button type="button" className="icon-button" onClick={() => navigate('/agenda')} aria-label="Abrir agenda y notificaciones" title="Agenda y notificaciones">
+              <Bell size={19} />
+            </button>
+            <span className="topbar-avatar" aria-label={`${user?.nombre || 'Usuario'}, ${roleLabels[userRole]}`}>{userInitial}</span>
           </div>
         </header>
 
-        {/* OUTLET CONTENT */}
-        <main style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-6)' }}>
+        <main id="main-content" className="app-content" tabIndex={-1}>
           <Outlet />
         </main>
-
       </div>
     </div>
   );

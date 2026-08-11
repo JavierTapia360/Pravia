@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 
 interface SlideOverProps {
@@ -11,10 +11,26 @@ interface SlideOverProps {
 
 export function SlideOver({ isOpen, onClose, title, children, width = '600px' }: SlideOverProps) {
   const [shouldRender, setShouldRender] = useState(false);
+  const titleId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (isOpen) setShouldRender(true);
-  }, [isOpen]);
+    if (!isOpen) return;
+    setShouldRender(true);
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.setTimeout(() => panelRef.current?.focus(), 0);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [isOpen, onClose]);
 
   const onAnimationEnd = () => {
     if (!isOpen) setShouldRender(false);
@@ -41,6 +57,11 @@ export function SlideOver({ isOpen, onClose, title, children, width = '600px' }:
       
       {/* Panel */}
       <div 
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         onAnimationEnd={onAnimationEnd}
         style={{
           position: 'relative',
@@ -64,8 +85,8 @@ export function SlideOver({ isOpen, onClose, title, children, width = '600px' }:
           alignItems: 'center',
           background: 'var(--bg-primary)'
         }}>
-          <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{title}</div>
-          <button onClick={onClose} className="btn-icon">
+          <div id={titleId} style={{ fontSize: '1.25rem', fontWeight: 600 }}>{title}</div>
+          <button type="button" onClick={onClose} className="btn-icon" aria-label="Cerrar panel">
             <X size={20} />
           </button>
         </div>

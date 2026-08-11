@@ -93,7 +93,7 @@ export default function MiDia() {
       {/* HEADER MI DÍA */}
       <div style={{ marginBottom: 'var(--space-8)' }}>
         <h1 style={{ fontSize: '2.5rem', marginBottom: 'var(--space-2)' }}>
-          Buenos días, {user?.nombre || 'Usuario'} 👋
+          Buenos días, {user?.nombre || 'Usuario'}
         </h1>
         <p className="text-secondary" style={{ fontSize: '1.1rem', textTransform: 'capitalize' }}>
           {fechaHoy}
