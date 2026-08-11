@@ -23,6 +23,7 @@ import authRoutes from './routes/auth.routes';
 import usersRoutes from './routes/users.routes';
 import storageRoutes from './routes/storage.routes';
 import { authenticate, authorizeByMethod, requirePasswordReady, requirePermission } from './middleware/auth.middleware';
+import { errorLogLevel, normalizeErrorBody } from './utils/httpError';
 
 const app = express();
 app.disable('etag');
@@ -61,14 +62,25 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     res.setHeader('Cache-Control', 'no-store');
   }
 
+  const originalJson = res.json.bind(res);
+  res.json = ((body: unknown) => {
+    if (res.statusCode < 400) return originalJson(body);
+    const normalized = normalizeErrorBody(body, res.statusCode, correlationId, process.env.NODE_ENV === 'production');
+    res.locals.errorCode = normalized.code;
+    return originalJson(normalized);
+  }) as Response['json'];
+
   res.on('finish', () => {
     console.log(JSON.stringify({
       type: 'http_request',
+      level: errorLogLevel(res.statusCode),
       method: req.method,
       path: req.path,
       status: res.statusCode,
       duration_ms: Date.now() - startedAt,
       correlation_id: correlationId,
+      user_id: req.user?.id,
+      error_code: res.locals.errorCode,
     }));
   });
 
@@ -216,6 +228,25 @@ app.use((req: Request, res: Response) => {
     code: 'ROUTE_NOT_FOUND',
     error: `Ruta no encontrada: ${req.method} ${req.path}`,
     correlation_id: correlationId,
+  });
+});
+
+// Error final: captura fallos no controlados sin exponer stack, secretos o datos del usuario.
+app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
+  const correlationId = req.correlationId || randomUUID();
+  console.error(JSON.stringify({
+    type: 'unhandled_error',
+    level: 'error',
+    method: req.method,
+    path: req.path,
+    correlation_id: correlationId,
+    user_id: req.user?.id,
+    error_name: error instanceof Error ? error.name : 'UnknownError',
+  }));
+  if (res.headersSent) return;
+  return res.status(500).json({
+    code: 'INTERNAL_ERROR',
+    error: 'No fue posible completar la solicitud. Intenta de nuevo.',
   });
 });
 
