@@ -1,9 +1,9 @@
 import 'dotenv/config';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PrismaClient } from '@prisma/client';
+import prisma, { configuredDatabaseSchema } from '../config/prisma';
 
-const prisma = new PrismaClient();
 const legacyTables = [
+  '_prisma_migrations',
   'documentos_cargados',
   'documentos_requeridos',
   'expedientes',
@@ -11,7 +11,6 @@ const legacyTables = [
   'hallazgos',
   'proyectos_escritura',
   'tipos_acto',
-  'usuarios',
 ];
 
 describe.sequential('Supabase: contrato de integración de solo lectura', () => {
@@ -26,7 +25,8 @@ describe.sequential('Supabase: contrato de integración de solo lectura', () => 
     const rows = await prisma.$queryRaw<Array<{ schema: string; alive: number }>>`
       SELECT current_schema() AS schema, 1 AS alive
     `;
-    expect(rows).toEqual([{ schema: 'pravia_os', alive: 1 }]);
+    expect(configuredDatabaseSchema).toBe('pravia_os');
+    expect(rows).toEqual([{ schema: configuredDatabaseSchema, alive: 1 }]);
   });
 
   it('conserva las entidades críticas y permite leer sus conteos', async () => {
@@ -57,7 +57,39 @@ describe.sequential('Supabase: contrato de integración de solo lectura', () => 
     expect(Number(rows[0].total)).toBeGreaterThanOrEqual(2);
   });
 
-  it('mantiene bloqueadas con RLS las ocho tablas legadas de public', async () => {
+  it('conserva los hitos estructurales de autenticación, IA, agenda y comparecientes', async () => {
+    const tables = await prisma.$queryRaw<Array<{ table_name: string }>>`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'pravia_os'
+        AND table_name = ANY(${[
+          'auth_sessions',
+          'password_reset_tokens',
+          'compareciente_alta_sessions',
+          'ai_usage_logs',
+          'compliance_rule_sets',
+          'domain_event_outbox',
+        ]}::text[])
+      ORDER BY table_name
+    `;
+    expect(tables).toHaveLength(6);
+
+    const columns = await prisma.$queryRaw<Array<{ table_name: string; column_name: string }>>`
+      SELECT table_name, column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'pravia_os'
+        AND (table_name, column_name) IN (
+          ('users', 'password_changed_at'),
+          ('eventos_agenda', 'cancelado_at'),
+          ('expediente_comparecientes', 'datos_validados'),
+          ('expediente_comparecientes', 'validado_por_id'),
+          ('expediente_comparecientes', 'validado_at')
+        )
+    `;
+    expect(columns).toHaveLength(5);
+  });
+
+  it('mantiene bloqueados con RLS los ocho objetos legados de public', async () => {
     const rls = await prisma.$queryRaw<Array<{ relname: string; relrowsecurity: boolean }>>`
       SELECT c.relname, c.relrowsecurity
       FROM pg_class c
@@ -87,6 +119,9 @@ describe.sequential('Supabase: contrato de integración de solo lectura', () => 
       'idx_movimientos_expediente_fk',
       'idx_tareas_expediente_fk',
       'idx_compliance_reviews_rule_fk',
+      'idx_comp_actividades_actividad_fk',
+      'idx_exp_comparecientes_validador_fk',
+      'idx_pm_representantes_persona_fk',
     ];
     const rows = await prisma.$queryRaw<Array<{ indexname: string }>>`
       SELECT indexname
@@ -94,5 +129,24 @@ describe.sequential('Supabase: contrato de integración de solo lectura', () => 
       WHERE schemaname = 'pravia_os' AND indexname = ANY(${required}::text[])
     `;
     expect(rows.map((row) => row.indexname).sort()).toEqual([...required].sort());
+  });
+
+  it('no deja llaves foráneas operativas sin un índice utilizable', async () => {
+    const rows = await prisma.$queryRaw<Array<{ missing: bigint }>>`
+      SELECT count(*) AS missing
+      FROM pg_constraint c
+      JOIN pg_namespace n ON n.oid = c.connamespace
+      WHERE c.contype = 'f'
+        AND n.nspname = 'pravia_os'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_index i
+          WHERE i.indrelid = c.conrelid
+            AND i.indisvalid
+            AND i.indisready
+            AND c.conkey <@ i.indkey::smallint[]
+        )
+    `;
+    expect(Number(rows[0].missing)).toBe(0);
   });
 });
