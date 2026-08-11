@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:pwa": "node scripts/verify-pwa.mjs"
   },
   "dependencies": {
     "docx-preview": "^0.4.0",

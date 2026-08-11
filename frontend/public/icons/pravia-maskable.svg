@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="PRAVIA">
+  <rect width="512" height="512" fill="#07111f"/>
+  <path fill="#d6ab68" d="M166 126h108c78 0 126 39 126 106 0 69-50 109-131 109h-41v67h-62V126Zm62 54v108h45c40 0 63-19 63-55 0-34-23-53-63-53h-45Z"/>
+  <rect x="166" y="373" width="192" height="9" rx="4.5" fill="#f2dfb9" opacity=".88"/>
+</svg>

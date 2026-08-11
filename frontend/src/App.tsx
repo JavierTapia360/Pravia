@@ -48,6 +48,7 @@ const PermissionRoute = ({ permission, children }: { permission: string; childre
 
 import { ToastContainer } from './components/ui/ToastContainer';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
+import { PwaStatus } from './components/pwa/PwaStatus';
 
 function App() {
   const initialize = useAuthStore((state) => state.initialize);
@@ -92,6 +93,7 @@ function App() {
         </Suspense>
       </BrowserRouter>
       <ToastContainer />
+      <PwaStatus />
     </ErrorBoundary>
   );
 }

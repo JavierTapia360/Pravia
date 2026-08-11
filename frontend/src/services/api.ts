@@ -1,6 +1,7 @@
 // Same-origin by default: Vite proxies `/api` in development and production can
 // either serve both layers together or set VITE_API_URL explicitly.
 import { getAccessToken, refreshAccessToken } from './authToken';
+import { canWriteToServer } from './connectivity';
 const API_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 
 class ApiError extends Error {
@@ -20,6 +21,10 @@ const handleResponse = async (res: globalThis.Response) => {
 };
 
 const request = async (endpoint: string, init: RequestInit = {}, retry = true): Promise<any> => {
+  const method = String(init.method || 'GET').toUpperCase();
+  if (!['GET', 'HEAD'].includes(method) && !canWriteToServer()) {
+    throw new ApiError(0, 'Sin conexión al servidor. La operación no se realizó.');
+  }
   const token = getAccessToken();
   const headers = new Headers(init.headers || {});
   if (token) headers.set('Authorization', `Bearer ${token}`);
