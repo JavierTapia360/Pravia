@@ -46,12 +46,13 @@ export async function uploadFile(buffer: Buffer, fileName: string, mimeType: str
 }
 
 /**
- * Obtiene una URL firmada temporal (2 horas)
+ * Obtiene una URL firmada temporal. Diez minutos por defecto y una hora como máximo.
  */
-export async function getSignedUrl(path: string) {
+export async function getSignedUrl(path: string, expiresInSeconds = 600) {
+  const safeExpiry = Math.max(60, Math.min(3600, Math.floor(expiresInSeconds)));
   const { data, error } = await getSupabaseClient().storage
     .from(BUCKET_NAME)
-    .createSignedUrl(path, 7200); // 2 hours
+    .createSignedUrl(path, safeExpiry);
 
   if (error) {
     throw new Error(`Error generando URL firmada: ${error.message}`);

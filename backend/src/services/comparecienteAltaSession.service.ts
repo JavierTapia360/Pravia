@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import path from 'path';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { uploadFile, deleteFile, downloadFile } from './supabase.service';
 import {
@@ -11,6 +12,7 @@ import {
   DomicilioDetectado,
   DocumentoParaExtraccion
 } from './openaiDocument.service';
+import { validateCurp, validateOptionalDate, validateRfc } from '../domain/mexicanIdentity';
 
 const EXPIRATION_HOURS = parseInt(process.env.COMPARECIENTE_ALTA_EXPIRATION_HOURS || '24', 10);
 
@@ -187,7 +189,7 @@ export class ComparecienteAltaSessionService {
 
     let finalUsuarioId = sesion.usuario_id;
     if (usuarioId) {
-      const u = await prisma.user.findUnique({ where: { id: usuarioId } });
+      const u = await prisma.user.findFirst({ where: { id: usuarioId, activo: true } });
       if (u) finalUsuarioId = u.id;
     }
 
@@ -651,8 +653,36 @@ export class ComparecienteAltaSessionService {
 
     const esFisica = tipo_persona === 'FISICA';
     const nombreCompleto = esFisica ? `${nombre || ''} ${apellido_paterno || ''} ${apellido_materno || ''}`.trim() : (razon_social || '');
+    if (!nombreCompleto) throw new Error(esFisica ? 'El nombre de la persona física es obligatorio.' : 'La razón social es obligatoria.');
+    const cleanCurp = esFisica ? validateCurp(curp) : null;
+    const cleanRfc = validateRfc(rfc, esFisica ? 'FISICA' : 'MORAL');
+    const birthDate = esFisica ? validateOptionalDate(fecha_nacimiento, 'La fecha de nacimiento') : null;
+    const incorporationDate = !esFisica ? validateOptionalDate(fecha_constitucion, 'La fecha de constitución') : null;
 
     return await prisma.$transaction(async (tx) => {
+      const identityKey = cleanCurp || cleanRfc || nombreCompleto.toUpperCase();
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:compareciente:${identityKey}`}))`);
+      const duplicate = esFisica
+        ? await tx.personaFisica.findFirst({
+            where: {
+              archived_at: null,
+              OR: [
+                ...(cleanCurp ? [{ curp: { equals: cleanCurp, mode: 'insensitive' as const } }] : []),
+                ...(cleanRfc ? [{ rfc: { equals: cleanRfc, mode: 'insensitive' as const } }] : []),
+              ],
+            },
+            select: { compareciente_id: true },
+          })
+        : cleanRfc
+          ? await tx.personaMoral.findFirst({
+              where: { archived_at: null, rfc: { equals: cleanRfc, mode: 'insensitive' } },
+              select: { compareciente_id: true },
+            })
+          : null;
+      if (duplicate) {
+        throw new Error(`Ya existe un compareciente con el mismo identificador (${duplicate.compareciente_id}). Vincula el registro existente.`);
+      }
+
       // 1. Crear Compareciente Maestro
       const compareciente = await tx.compareciente.create({
         data: {
@@ -670,20 +700,24 @@ export class ComparecienteAltaSessionService {
         await tx.personaFisica.create({
           data: {
             compareciente_id: compareciente.id,
-            nombre: nombre || 'Sin nombre',
+            nombre,
             apellido_paterno: apellido_paterno || null,
             apellido_materno: apellido_materno || null,
             nombre_completo_calculado: nombreCompleto,
             sexo: sexoNormalizado,
-            fecha_nacimiento: fecha_nacimiento ? new Date(fecha_nacimiento) : null,
+            fecha_nacimiento: birthDate,
             lugar_nacimiento: lugar_nacimiento || null,
+            pais_nacimiento: pais_nacimiento || null,
             nacionalidad: nacionalidad || 'Mexicana',
-            curp: curp || null,
-            rfc: rfc || null,
+            curp: cleanCurp,
+            rfc: cleanRfc,
             estado_civil: estado_civil || null,
             regimen_matrimonial: estado_civil === 'CASADO' ? regimen_matrimonial : null,
+            escolaridad: escolaridad || null,
             ocupacion: ocupacion || null,
             actividad_economica: actividad_economica || null,
+            giro: giro || null,
+            pep: pep_estado === 'SI',
             pep_estado: pep_estado || 'PENDIENTE',
             relacion_pep: pep_estado === 'SI' ? relacion_pep : null
           }
@@ -693,15 +727,37 @@ export class ComparecienteAltaSessionService {
         await tx.personaMoral.create({
           data: {
             compareciente_id: compareciente.id,
-            razon_social: razon_social || 'Sin Razón Social',
+            razon_social,
             nombre_comercial: nombre_comercial || null,
             tipo_societario: tipo_societario || null,
-            rfc: rfc || null,
+            rfc: cleanRfc,
             nacionalidad: nacionalidad_moral || 'Mexicana',
-            fecha_constitucion: fecha_constitucion ? new Date(fecha_constitucion) : null,
+            fecha_constitucion: incorporationDate,
             duracion: duracion_moral || 'Indefinida',
             objeto_social_resumido: objeto_social_resumido || null
           }
+        });
+      }
+
+      for (const [index, alias] of (Array.isArray(aliases) ? aliases : []).map((value: unknown) => String(value).trim()).filter(Boolean).entries()) {
+        await tx.comparecienteAlias.create({
+          data: { compareciente_id: compareciente.id, alias, principal: index === 0 },
+        });
+      }
+
+      const contactValues = [
+        telefono ? { tipo: 'TELEFONO' as const, valor: String(telefono).trim() } : null,
+        correo ? { tipo: 'CORREO' as const, valor: String(correo).trim().toLowerCase() } : null,
+      ].filter((value): value is { tipo: 'TELEFONO' | 'CORREO'; valor: string } => Boolean(value?.valor));
+      for (const [index, contact] of contactValues.entries()) {
+        await tx.comparecienteContacto.create({
+          data: {
+            compareciente_id: compareciente.id,
+            tipo: contact.tipo,
+            valor: contact.valor,
+            principal: index === 0,
+            creado_por_id: finalUsuarioId,
+          },
         });
       }
 
@@ -745,6 +801,7 @@ export class ComparecienteAltaSessionService {
             estado: partEstado || null,
             pais: partPais || 'México',
             referencia: partRef || null,
+            comprobado: Boolean(partDoc),
             principal: true,
             creado_por_id: finalUsuarioId
           }
@@ -766,6 +823,7 @@ export class ComparecienteAltaSessionService {
             estado: dom_fiscal_estado || null,
             pais: dom_fiscal_pais || 'México',
             referencia: dom_fiscal_referencias || null,
+            comprobado: Boolean(dom_fiscal_documento),
             principal: !creoParticular,
             creado_por_id: finalUsuarioId
           }
@@ -797,6 +855,7 @@ export class ComparecienteAltaSessionService {
               municipio: d.municipio || null,
               estado: d.estado || null,
               pais: d.pais || 'México',
+              comprobado: d.tipo_sugerido === 'COMPROBADO',
               principal: i === 0,
               creado_por_id: finalUsuarioId
             }
@@ -806,12 +865,12 @@ export class ComparecienteAltaSessionService {
 
 
       // 5. Crear Identificación Oficial si se proporcionó folio o tipo
-      if (folio_identificacion || tipo_identificacion) {
+      if (folio_identificacion) {
         await tx.comparecienteIdentificacion.create({
           data: {
             compareciente_id: compareciente.id,
             tipo_identificacion: tipo_identificacion || 'INE',
-            numero: folio_identificacion || 'SIN_FOLIO',
+            numero: folio_identificacion,
             autoridad_emisora: autoridad_emisora || null,
             pais_emisor: pais_emisor || 'México',
             fecha_expedicion: fecha_expedicion_identificacion ? new Date(fecha_expedicion_identificacion) : null,
