@@ -151,7 +151,8 @@ async function main() {
     nacionalidad: 'Mexicana',
     pep_estado: 'NO',
   });
-  const comparecienteId = person.data.id;
+  const comparecienteId = person.data?.compareciente?.id || person.data?.id;
+  if (!comparecienteId) throw new Error('La creación de persona no devolvió el ID maestro del compareciente.');
   created.compareciente = comparecienteId;
   const firstLink = await post('/comparecientes/vincular-expediente', {
     expediente_id: expediente.id, compareciente_id: comparecienteId, caracter_id: caracter.id,
@@ -165,7 +166,7 @@ async function main() {
   const pdf = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF');
   const documentForm = new FormData();
   documentForm.set('file', new Blob([pdf], { type: 'application/pdf' }), `evidencia-${suffix}.pdf`);
-  documentForm.set('categoria', 'IDENTIFICACION');
+  documentForm.set('categoria', 'FIRMA');
   documentForm.set('carpeta', 'Administrativo');
   const document = await request(`/expedientes/${expediente.id}/documentos`, { method: 'POST', body: documentForm });
   if (!document.documento?.storage_key) throw new Error('El documento no conservó storage_key.');
