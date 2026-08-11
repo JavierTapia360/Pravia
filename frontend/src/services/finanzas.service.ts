@@ -8,6 +8,9 @@ export interface KPIFinancieroGlobal {
   pendiente_cobro: number;
   egresos_realizados: number;
   pendiente_pago: number;
+  saldo_terceros: number;
+  fondos_retenidos: number;
+  utilidad_pravia: number;
   participacion_pravia: number;
   total_presupuestado_general: number;
 }
@@ -29,6 +32,9 @@ export interface ExpedienteItemFinanciero {
   saldo_pendiente: number;
   total_egresado: number;
   pendiente_egresos: number;
+  saldo_terceros: number;
+  fondos_retenidos: number;
+  utilidad_pravia: number;
   honorarios_generados: number;
   ingreso_real_honorarios: number;
   estado_financiero:

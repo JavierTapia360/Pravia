@@ -13,6 +13,11 @@ import {
   ExpedienteWorkflowError,
   getAllowedExpedienteTransitions,
 } from '../domain/expedienteWorkflow';
+import {
+  FinancialLedgerError,
+  normalizeFinancialCategory,
+  validateMovementSemantics,
+} from '../domain/financialLedger';
 
 const cotizacionConversionService = new CotizacionConversionService(prisma);
 
@@ -143,7 +148,12 @@ export const getExpedienteById = async (req: Request, res: Response) => {
           orderBy: { fecha_movimiento: 'desc' },
           include: {
             capturado_por: { select: { id: true, nombre: true, apellido: true } },
-            validado_por: { select: { id: true, nombre: true, apellido: true } }
+            validado_por: { select: { id: true, nombre: true, apellido: true } },
+            movimientoDocumentos: {
+              where: { estatus: 'ACTIVO' },
+              include: { documento: true },
+              orderBy: { fecha_vinculo: 'desc' },
+            },
           }
         },
         actividades: {
@@ -435,30 +445,29 @@ function normalizarTipoMovimiento(tipo?: string): TipoMovimiento {
   if (['EGRESO_NOTARIA', 'NOTARIA', 'PAGO_NOTARIA'].includes(t)) return 'EGRESO_NOTARIA';
   if (['EGRESO_TERCEROS', 'TERCEROS', 'DERECHOS'].includes(t)) return 'EGRESO_TERCEROS';
   if (['AJUSTE'].includes(t)) return 'AJUSTE';
-  return 'ANTICIPO';
+  throw new FinancialLedgerError('Selecciona un tipo de movimiento financiero válido.', 'FINANCIAL_TYPE_INVALID');
 }
 
 function normalizarNaturaleza(nat?: string): NaturalezaMovimiento {
   const n = (nat || '').toUpperCase().trim();
   if (n === 'EGRESO') return 'EGRESO';
-  return 'INGRESO';
+  if (n === 'INGRESO') return 'INGRESO';
+  throw new FinancialLedgerError('Selecciona si el movimiento es ingreso o egreso.', 'FINANCIAL_NATURE_INVALID');
+}
+
+async function resolveActiveFinancialActor(req: Request) {
+  const actorId = (req as any).user?.id || req.body?.user_id;
+  if (!actorId) return null;
+  return prisma.user.findFirst({ where: { id: actorId, activo: true }, select: { id: true } });
 }
 
 // 6. Registrar Movimiento Financiero
 export const addMovimientoFinanciero = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { tipo_movimiento, naturaleza, categoria, concepto, monto, forma_pago, referencia } = req.body;
-
-    let actorUserId = (req as any).user?.id || req.body.user_id;
-    if (!actorUserId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) actorUserId = defaultUser.id;
-    }
-
-    if (!actorUserId) {
-      return res.status(400).json({ error: 'No se encontró un usuario válido para registrar el movimiento' });
-    }
+    const { tipo_movimiento, naturaleza, categoria, concepto, monto, forma_pago, referencia, fecha_movimiento } = req.body;
+    const actor = await resolveActiveFinancialActor(req);
+    if (!actor) return res.status(401).json({ error: 'Se requiere un usuario activo para registrar el movimiento.' });
 
     if (!tipo_movimiento || !naturaleza || !concepto || !monto) {
       return res.status(400).json({ error: 'Campos requeridos: tipo_movimiento, naturaleza, concepto, monto' });
@@ -466,42 +475,85 @@ export const addMovimientoFinanciero = async (req: Request, res: Response) => {
 
     const normTipo = normalizarTipoMovimiento(tipo_movimiento);
     const normNat = normalizarNaturaleza(naturaleza);
-
-    // Protection against duplicate requests (Idempotency check within 5 seconds)
-    const recentDuplicate = await prisma.movimientoFinanciero.findFirst({
-      where: {
-        expediente_id: id,
-        concepto,
-        monto: Number(monto),
-        fecha_movimiento: { gte: new Date(Date.now() - 5000) }
-      }
-    });
-
-    if (recentDuplicate) {
-      return res.status(200).json(recentDuplicate);
+    const normalizedCategory = normalizeFinancialCategory(categoria);
+    const numericAmount = Number(monto);
+    const movementDate = fecha_movimiento ? new Date(`${fecha_movimiento}T12:00:00`) : new Date();
+    if (Number.isNaN(movementDate.getTime())) {
+      return res.status(400).json({ error: 'La fecha del movimiento no es válida.' });
     }
+    validateMovementSemantics({
+      tipo: normTipo,
+      naturaleza: normNat,
+      categoria: normalizedCategory,
+      monto: numericAmount,
+    });
+    const cleanConcept = String(concepto).trim();
+    const cleanReference = typeof referencia === 'object' ? JSON.stringify(referencia) : String(referencia || '').trim() || null;
 
-    const movimiento = await prisma.movimientoFinanciero.create({
-      data: {
-        expediente_id: id,
-        tipo_movimiento: normTipo,
-        naturaleza: normNat,
-        categoria: categoria || (normNat === 'EGRESO' ? 'TERCEROS' : 'NOTARIA'),
-        concepto,
-        monto: Number(monto),
-        forma_pago: forma_pago || 'TRANSFERENCIA',
-        referencia: typeof referencia === 'object' ? JSON.stringify(referencia) : referencia,
-        capturado_por_id: actorUserId,
-        estatus: 'VALIDADO'
-      }
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:movimiento:${id}`}))`);
+      const expediente = await tx.expediente.findFirst({ where: { id, archived_at: null }, select: { id: true } });
+      if (!expediente) throw new FinancialLedgerError('Expediente activo no encontrado.', 'EXPEDIENTE_NOT_FOUND', 404);
+
+      const recentDuplicate = await tx.movimientoFinanciero.findFirst({
+        where: {
+          expediente_id: id,
+          naturaleza: normNat,
+          categoria: normalizedCategory,
+          concepto: cleanConcept,
+          monto: numericAmount,
+          referencia: cleanReference,
+          fecha_validacion: { gte: new Date(Date.now() - 10_000) },
+        },
+      });
+      if (recentDuplicate) return { movimiento: recentDuplicate, idempotent: true };
+
+      const estatus = normNat === 'INGRESO' ? 'RECIBIDO' : 'VALIDADO';
+      const movimiento = await tx.movimientoFinanciero.create({
+        data: {
+          expediente_id: id,
+          tipo_movimiento: normTipo,
+          naturaleza: normNat,
+          categoria: normalizedCategory,
+          concepto: cleanConcept,
+          monto: numericAmount,
+          fecha_movimiento: movementDate,
+          forma_pago: String(forma_pago || 'TRANSFERENCIA').trim(),
+          referencia: cleanReference,
+          capturado_por_id: actor.id,
+          validado_por_id: actor.id,
+          fecha_validacion: new Date(),
+          estatus,
+        },
+      });
+      await tx.expedienteActividad.create({
+        data: {
+          expediente_id: id,
+          tipo: 'PAGO',
+          titulo: `${normNat === 'INGRESO' ? 'Ingreso recibido' : 'Egreso validado'} (${normalizedCategory})`,
+          descripcion: `${cleanConcept}: $${numericAmount.toFixed(2)} MXN`,
+          usuario_id: actor.id,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          user_id: actor.id,
+          accion: 'CREATE_FINANCIAL_MOVEMENT',
+          entidad: 'MovimientoFinanciero',
+          entidad_id: movimiento.id,
+          valores_nuevos: { expediente_id: id, tipo_movimiento: normTipo, naturaleza: normNat, categoria: normalizedCategory, monto: numericAmount, estatus },
+          correlation_id: (req as any).correlationId,
+        },
+      });
+      return { movimiento, idempotent: false };
     });
 
     await calculateExpedienteProgress(id);
-
-    res.status(201).json(movimiento);
+    res.status(result.idempotent ? 200 : 201).json({ ...result.movimiento, idempotent: result.idempotent });
   } catch (error: any) {
     console.error('[addMovimientoFinanciero] Error:', error);
-    res.status(500).json({
+    const status = error instanceof FinancialLedgerError ? error.status : 500;
+    res.status(status).json({
       error: 'Error al registrar movimiento financiero',
       detail: error.message,
       code: error.code || 'PRISMA_ERROR'
@@ -519,30 +571,22 @@ export const reverseMovimientoFinanciero = async (req: Request, res: Response) =
       return res.status(400).json({ error: 'El motivo de reverso es obligatorio' });
     }
 
-    let actorUserId = (req as any).user?.id || req.body.user_id;
-    if (!actorUserId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) actorUserId = defaultUser.id;
-    }
-
-    if (!actorUserId) {
-      return res.status(400).json({ error: 'No se encontró un usuario válido para la reversión' });
-    }
-
-    const original = await prisma.movimientoFinanciero.findUnique({
-      where: { id: movimientoId }
-    });
-
-    if (!original) {
-      return res.status(404).json({ error: 'Movimiento original no encontrado' });
-    }
-
-    if (original.estatus === 'REVERTIDO') {
-      return res.status(400).json({ error: 'Este movimiento financiero ya fue revertido previamente' });
-    }
+    const actor = await resolveActiveFinancialActor(req);
+    if (!actor) return res.status(401).json({ error: 'Se requiere un usuario activo para revertir el movimiento.' });
 
     const reverso = await prisma.$transaction(async (tx) => {
-      // Crear movimiento de reverso compensatorio
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:movimiento-reverso:${movimientoId}`}))`);
+      const original = await tx.movimientoFinanciero.findFirst({ where: { id: movimientoId, expediente_id: id } });
+      if (!original) throw new FinancialLedgerError('Movimiento original no encontrado.', 'MOVEMENT_NOT_FOUND', 404);
+      if (!['VALIDADO', 'RECIBIDO'].includes(original.estatus)) {
+        throw new FinancialLedgerError('Solo se pueden revertir movimientos activos y validados.', 'MOVEMENT_NOT_REVERSIBLE');
+      }
+      if (original.categoria === 'REVERSO' || original.movimiento_origen_id) {
+        throw new FinancialLedgerError('Un contramovimiento técnico no puede volver a revertirse.', 'TECHNICAL_REVERSE_NOT_REVERSIBLE');
+      }
+      const priorReverse = await tx.movimientoFinanciero.findFirst({ where: { movimiento_origen_id: original.id } });
+      if (priorReverse) throw new FinancialLedgerError('Este movimiento ya tiene un reverso registrado.', 'MOVEMENT_ALREADY_REVERSED', 409);
+
       const rev = await tx.movimientoFinanciero.create({
         data: {
           expediente_id: id,
@@ -551,13 +595,13 @@ export const reverseMovimientoFinanciero = async (req: Request, res: Response) =
           categoria: 'REVERSO',
           concepto: `Reverso de: ${original.concepto}`,
           monto: original.monto,
-          capturado_por_id: actorUserId,
-          validado_por_id: actorUserId,
+          capturado_por_id: actor.id,
+          validado_por_id: actor.id,
           fecha_validacion: new Date(),
           estatus: 'VALIDADO',
           movimiento_origen_id: original.id,
           motivo_reversion,
-          revertido_por_id: actorUserId,
+          revertido_por_id: actor.id,
           fecha_reversion: new Date()
         }
       });
@@ -565,7 +609,7 @@ export const reverseMovimientoFinanciero = async (req: Request, res: Response) =
       // Marcar original como REVERTIDO
       await tx.movimientoFinanciero.update({
         where: { id: original.id },
-        data: { estatus: 'REVERTIDO' }
+        data: { estatus: 'REVERTIDO', motivo_reversion: motivo_reversion.trim(), revertido_por_id: actor.id, fecha_reversion: new Date() }
       });
 
       // Bitácora de actividad
@@ -575,8 +619,19 @@ export const reverseMovimientoFinanciero = async (req: Request, res: Response) =
           tipo: 'AUDITORIA',
           titulo: `Movimiento Financiero Revertido ($${original.monto})`,
           descripcion: `Motivo: ${motivo_reversion}`,
-          usuario_id: actorUserId
+          usuario_id: actor.id
         }
+      });
+      await tx.auditLog.create({
+        data: {
+          user_id: actor.id,
+          accion: 'REVERSE_FINANCIAL_MOVEMENT',
+          entidad: 'MovimientoFinanciero',
+          entidad_id: original.id,
+          valores_anteriores: { estatus: original.estatus, monto: Number(original.monto), naturaleza: original.naturaleza },
+          valores_nuevos: { estatus: 'REVERTIDO', reverso_id: rev.id, motivo: motivo_reversion.trim() },
+          correlation_id: (req as any).correlationId,
+        },
       });
 
       return rev;
@@ -586,7 +641,8 @@ export const reverseMovimientoFinanciero = async (req: Request, res: Response) =
 
     res.json(reverso);
   } catch (error: any) {
-    res.status(500).json({ error: 'Error al revertir movimiento financiero', detail: error.message });
+    const status = error instanceof FinancialLedgerError ? error.status : 500;
+    res.status(status).json({ error: 'Error al revertir movimiento financiero', detail: error.message, code: error.code });
   }
 };
 
@@ -1210,87 +1266,23 @@ export const downloadExpedienteDocumento = async (req: Request, res: Response) =
   }
 };
 
-// 12. Eliminar Operativamente Movimiento Financiero (Sin motivo obligatorio, sin contramovimientos)
-export const deleteMovimientoFinanciero = async (req: Request, res: Response) => {
-  try {
-    const { id, movimientoId } = req.params;
-    let userId = (req as any).user?.id || req.body?.user_id;
-
-    if (!userId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) userId = defaultUser.id;
-    }
-
-    const mov = await prisma.movimientoFinanciero.findUnique({
-      where: { id: movimientoId }
-    });
-
-    if (!mov) {
-      return res.status(404).json({
-        success: false,
-        error: 'Movimiento no encontrado',
-        detail: `No existe el movimiento con ID ${movimientoId}`
-      });
-    }
-
-    // Marca estatus como CANCELADO (desaparece de la vista y totales, sin motivo obligatorio)
-    await prisma.$transaction(async (tx) => {
-      await tx.movimientoFinanciero.update({
-        where: { id: movimientoId },
-        data: {
-          estatus: 'CANCELADO',
-          revertido_por_id: userId,
-          fecha_reversion: new Date()
-        }
-      });
-
-      if (userId) {
-        await tx.expedienteActividad.create({
-          data: {
-            expediente_id: id,
-            tipo: 'AUDITORIA',
-            titulo: `Movimiento Financiero Eliminado ($${mov.monto})`,
-            descripcion: `Eliminación operativa de "${mov.concepto}" ($${mov.monto})`,
-            usuario_id: userId
-          }
-        });
-      }
-    });
-
-    await calculateExpedienteProgress(id);
-
-    return res.status(200).json({
-      success: true,
-      message: 'Movimiento eliminado exitosamente'
-    });
-  } catch (error: any) {
-    console.error('[deleteMovimientoFinanciero] Error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Error al eliminar movimiento financiero',
-      detail: error.message
-    });
-  }
-};
-
-// 13. Administrar Adjuntos Específicos por Movimiento (Comprobante, Factura PDF, Factura XML)
+// 12. Administrar Adjuntos Específicos por Movimiento (Comprobante, Factura PDF, Factura XML)
 export const updateMovimientoAdjunto = async (req: Request, res: Response) => {
   try {
     const { id, movimientoId } = req.params;
     const { tipo_adjunto, accion } = req.body;
 
-    if (accion !== 'ELIMINAR') {
+    if (accion !== 'ARCHIVAR') {
       return res.status(400).json({
         error: 'Acción no válida',
-        detail: 'Para cargar o sustituir adjuntos debe enviarse el archivo binario al endpoint de carga.'
+        detail: 'Los adjuntos solo pueden archivarse o sustituirse; nunca se eliminan físicamente.'
       });
     }
-
-    let userId = (req as any).user?.id || req.body.user_id;
-    if (!userId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) userId = defaultUser.id;
+    if (!['COMPROBANTE', 'FACTURA_PDF', 'FACTURA_XML'].includes(tipo_adjunto)) {
+      return res.status(400).json({ error: 'Tipo de adjunto no válido' });
     }
+    const actor = await resolveActiveFinancialActor(req);
+    if (!actor) return res.status(401).json({ error: 'Se requiere un usuario activo para archivar el adjunto.' });
 
     const mov = await prisma.movimientoFinanciero.findFirst({
       where: { id: movimientoId, expediente_id: id }
@@ -1309,69 +1301,68 @@ export const updateMovimientoAdjunto = async (req: Request, res: Response) => {
       currentRefData = { nota: mov.referencia };
     }
 
-    const updateData: any = {};
-    let accionDesc = '';
-    let storageKeyToDelete: string | null = null;
+    const updateData: Prisma.MovimientoFinancieroUpdateInput = {};
 
     if (tipo_adjunto === 'COMPROBANTE') {
-      storageKeyToDelete = currentRefData.comprobante_file || mov.comprobante_url || null;
       updateData.comprobante_url = null;
       currentRefData.comprobante_nombre = null;
       currentRefData.comprobante_file = null;
       currentRefData.comprobante_mime = null;
       currentRefData.comprobante_size = null;
-      accionDesc = 'Eliminado Comprobante de Pago';
     } else if (tipo_adjunto === 'FACTURA_PDF') {
-      storageKeyToDelete = currentRefData.factura_pdf_file || mov.factura_url || null;
       updateData.factura_url = null;
       currentRefData.factura_pdf_nombre = null;
       currentRefData.factura_pdf_file = null;
       currentRefData.factura_pdf_mime = null;
       currentRefData.factura_pdf_size = null;
-      accionDesc = 'Eliminada Factura PDF';
     } else if (tipo_adjunto === 'FACTURA_XML') {
-      storageKeyToDelete = currentRefData.factura_xml_file || currentRefData.factura_xml_url || null;
       currentRefData.factura_xml_url = null;
       currentRefData.factura_xml_nombre = null;
       currentRefData.factura_xml_file = null;
       currentRefData.factura_xml_mime = null;
       currentRefData.factura_xml_size = null;
-      accionDesc = 'Eliminada Factura XML';
-    } else {
-      return res.status(400).json({ error: 'Tipo de adjunto no válido' });
     }
 
     updateData.referencia = JSON.stringify(currentRefData);
 
     const updatedMov = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:movimiento-adjunto:${movimientoId}:${tipo_adjunto}`}))`);
+      await tx.movimientoDocumento.updateMany({
+        where: { movimiento_id: movimientoId, tipo_vinculo: tipo_adjunto, estatus: 'ACTIVO' },
+        data: {
+          estatus: 'INACTIVO',
+          inactivado_at: new Date(),
+          inactivado_por_id: actor.id,
+          motivo_inactivacion: 'Archivado desde el expediente',
+        },
+      });
       const result = await tx.movimientoFinanciero.update({
         where: { id: movimientoId },
         data: updateData
       });
 
-      if (userId) {
-        await tx.expedienteActividad.create({
-          data: {
-            expediente_id: id,
-            tipo: 'DOCUMENTO',
-            titulo: `Adjunto Financiero (${tipo_adjunto})`,
-            descripcion: `Acción: ${accionDesc} en movimiento "${mov.concepto}" ($${mov.monto})`,
-            usuario_id: userId
-          }
-        });
-      }
+      await tx.expedienteActividad.create({
+        data: {
+          expediente_id: id,
+          tipo: 'DOCUMENTO',
+          titulo: `Adjunto financiero archivado (${tipo_adjunto})`,
+          descripcion: `El archivo dejó de ser vigente en "${mov.concepto}"; su historial fue conservado.`,
+          usuario_id: actor.id,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          user_id: actor.id,
+          accion: 'ARCHIVE_FINANCIAL_ATTACHMENT',
+          entidad: 'MovimientoFinanciero',
+          entidad_id: movimientoId,
+          valores_nuevos: { expediente_id: id, tipo_adjunto, almacenamiento_conservado: true },
+          correlation_id: (req as any).correlationId,
+        },
+      });
 
       return result;
     });
-
-    if (storageKeyToDelete) {
-      if (storageKeyToDelete.startsWith('finanzas/')) {
-        await deleteFile(storageKeyToDelete).catch(() => {});
-      } else {
-        const localPath = path.join(FINANZAS_DIR, path.basename(storageKeyToDelete));
-        if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
-      }
-    }
 
     res.json({ success: true, movimiento: updatedMov });
   } catch (error: any) {
@@ -1413,10 +1404,26 @@ export const uploadMovimientoAdjuntoFile = async (req: Request, res: Response) =
       return res.status(400).json({ error: 'No se recibió ningún archivo' });
     }
 
-    let userId = (req as any).user?.id || req.body.user_id;
-    if (!userId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) userId = defaultUser.id;
+    const actor = await resolveActiveFinancialActor(req);
+    if (!actor) return res.status(401).json({ error: 'Se requiere un usuario activo para cargar el adjunto.' });
+
+    const acceptedFiles: Record<string, { mime: string[]; extensions: string[]; documentType: string }> = {
+      COMPROBANTE: {
+        mime: ['application/pdf', 'image/jpeg', 'image/png'],
+        extensions: ['.pdf', '.jpg', '.jpeg', '.png'],
+        documentType: 'COMPROBANTE_PAGO',
+      },
+      FACTURA_PDF: { mime: ['application/pdf'], extensions: ['.pdf'], documentType: 'FACTURA_PDF' },
+      FACTURA_XML: {
+        mime: ['application/xml', 'text/xml', 'application/octet-stream'],
+        extensions: ['.xml'],
+        documentType: 'FACTURA_XML',
+      },
+    };
+    const attachmentRule = acceptedFiles[tipo_adjunto];
+    const extension = path.extname(file.originalname).toLowerCase();
+    if (!attachmentRule || !attachmentRule.extensions.includes(extension) || !attachmentRule.mime.includes(file.mimetype)) {
+      return res.status(400).json({ error: 'El tipo o formato del archivo no es válido para este adjunto.' });
     }
 
     const mov = await prisma.movimientoFinanciero.findFirst({
@@ -1439,12 +1446,10 @@ export const uploadMovimientoAdjuntoFile = async (req: Request, res: Response) =
     uploadedStorageKey = `finanzas/${id}/${movimientoId}/${Date.now()}_${cleanName}`;
     await uploadFile(file.buffer, uploadedStorageKey, file.mimetype);
 
-    let updateData: any = {};
+    const updateData: Prisma.MovimientoFinancieroUpdateInput = {};
     let accionDesc = '';
-    let previousStorageKey: string | null = null;
 
     if (tipo_adjunto === 'COMPROBANTE') {
-      previousStorageKey = currentRefData.comprobante_file || mov.comprobante_url || null;
       updateData.comprobante_url = uploadedStorageKey;
       currentRefData.comprobante_nombre = file.originalname;
       currentRefData.comprobante_file = uploadedStorageKey;
@@ -1452,7 +1457,6 @@ export const uploadMovimientoAdjuntoFile = async (req: Request, res: Response) =
       currentRefData.comprobante_size = file.size;
       accionDesc = `Cargado/Sustituido Comprobante de Pago (${file.originalname})`;
     } else if (tipo_adjunto === 'FACTURA_PDF') {
-      previousStorageKey = currentRefData.factura_pdf_file || mov.factura_url || null;
       updateData.factura_url = uploadedStorageKey;
       currentRefData.factura_pdf_nombre = file.originalname;
       currentRefData.factura_pdf_file = uploadedStorageKey;
@@ -1460,7 +1464,6 @@ export const uploadMovimientoAdjuntoFile = async (req: Request, res: Response) =
       currentRefData.factura_pdf_size = file.size;
       accionDesc = `Cargada/Sustituida Factura PDF (${file.originalname})`;
     } else if (tipo_adjunto === 'FACTURA_XML') {
-      previousStorageKey = currentRefData.factura_xml_file || currentRefData.factura_xml_url || null;
       currentRefData.factura_xml_nombre = file.originalname;
       currentRefData.factura_xml_file = uploadedStorageKey;
       currentRefData.factura_xml_url = uploadedStorageKey;
@@ -1475,35 +1478,70 @@ export const uploadMovimientoAdjuntoFile = async (req: Request, res: Response) =
     updateData.referencia = JSON.stringify(currentRefData);
 
     const updatedMov = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:movimiento-adjunto:${movimientoId}:${tipo_adjunto}`}))`);
+      await tx.movimientoDocumento.updateMany({
+        where: { movimiento_id: movimientoId, tipo_vinculo: tipo_adjunto, estatus: 'ACTIVO' },
+        data: {
+          estatus: 'SUSTITUIDO',
+          inactivado_at: new Date(),
+          inactivado_por_id: actor.id,
+          motivo_inactivacion: `Sustituido por ${file.originalname}`,
+        },
+      });
+      const document = await tx.documento.create({
+        data: {
+          nombre_original: file.originalname,
+          nombre_interno: uploadedStorageKey!,
+          tipo: attachmentRule.documentType,
+          categoria: 'OTROS',
+          storage_key: uploadedStorageKey!,
+          mime_type: file.mimetype,
+          size_bytes: file.size,
+          estatus: 'VIGENTE',
+          subido_por_id: actor.id,
+          expediente_id: id,
+          observaciones: `Adjunto ${tipo_adjunto} del movimiento ${movimientoId}`,
+        },
+      });
+      await tx.movimientoDocumento.create({
+        data: {
+          movimiento_id: movimientoId,
+          documento_id: document.id,
+          tipo_vinculo: tipo_adjunto,
+          creado_por_id: actor.id,
+          estatus: 'ACTIVO',
+          observaciones: accionDesc,
+        },
+      });
       const result = await tx.movimientoFinanciero.update({
         where: { id: movimientoId },
         data: updateData
       });
 
-      if (userId) {
-        await tx.expedienteActividad.create({
-          data: {
-            expediente_id: id,
-            tipo: 'DOCUMENTO',
-            titulo: `Adjunto Financiero (${tipo_adjunto})`,
-            descripcion: `${accionDesc} en movimiento "${mov.concepto}" ($${mov.monto})`,
-            usuario_id: userId
-          }
-        });
-      }
+      await tx.expedienteActividad.create({
+        data: {
+          expediente_id: id,
+          tipo: 'DOCUMENTO',
+          titulo: `Adjunto financiero vigente (${tipo_adjunto})`,
+          descripcion: `${accionDesc} en movimiento "${mov.concepto}" ($${mov.monto})`,
+          usuario_id: actor.id,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          user_id: actor.id,
+          accion: 'UPLOAD_FINANCIAL_ATTACHMENT',
+          entidad: 'Documento',
+          entidad_id: document.id,
+          valores_nuevos: { movimiento_id: movimientoId, expediente_id: id, tipo_adjunto, storage_key: uploadedStorageKey },
+          correlation_id: (req as any).correlationId,
+        },
+      });
 
       return result;
     });
 
-    if (previousStorageKey && previousStorageKey !== uploadedStorageKey) {
-      if (previousStorageKey.startsWith('finanzas/')) {
-        await deleteFile(previousStorageKey).catch(() => {});
-      } else {
-        const previousLocalPath = path.join(FINANZAS_DIR, path.basename(previousStorageKey));
-        if (fs.existsSync(previousLocalPath)) fs.unlinkSync(previousLocalPath);
-      }
-    }
-
+    uploadedStorageKey = null;
     res.json(updatedMov);
   } catch (error: any) {
     if (uploadedStorageKey) await deleteFile(uploadedStorageKey).catch(() => {});

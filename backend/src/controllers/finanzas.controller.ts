@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/prisma';
+import { calculateFinancialPosition } from '../domain/financialLedger';
 
 const toFiniteNumber = (value: unknown, fallback = 0): number => {
   if (value === null || value === undefined || value === '') return fallback;
@@ -22,7 +23,7 @@ const getOperationalBudget = (exp: any) => {
       : toFiniteNumber(exp?.cotizacion?.honorarios_pravia);
     const totalPresupuestado = presupuesto.total_cliente !== undefined
       ? toFiniteNumber(presupuesto.total_cliente)
-      : totalNotaria + participacionPravia;
+      : totalNotaria;
 
     return { totalPresupuestado, totalNotaria, participacionPravia };
   }
@@ -95,31 +96,29 @@ export class FinanzasController {
       let itemsFinancieros = expedientes.map((exp) => {
         const { totalPresupuestado, totalNotaria, participacionPravia } = getOperationalBudget(exp);
 
-        // Movimientos de Ingreso Validados o Recibidos
-        const ingresosMovs = exp.movimientosFinancieros
-          .filter((m) => m.naturaleza === 'INGRESO' && ['VALIDADO', 'RECIBIDO'].includes(m.estatus))
-          .reduce((sum, m) => sum + Number(m.monto), 0);
-
-        const ingresosPagos = exp.pagos
-          .filter((p) => ['VALIDADO', 'RECIBIDO'].includes(p.estatus))
-          .reduce((sum, p) => sum + Number(p.monto), 0);
-
-        const cobrado = ingresosMovs > 0 ? ingresosMovs : ingresosPagos;
-
-        const devoluciones = exp.movimientosFinancieros
-          .filter((m) => m.tipo_movimiento === 'DEVOLUCION' && ['VALIDADO', 'RECIBIDO'].includes(m.estatus))
-          .reduce((sum, m) => sum + Number(m.monto), 0);
-
-        const cobradoNeto = Math.max(0, cobrado - devoluciones);
-        const saldoPendiente = Math.max(0, totalPresupuestado - cobradoNeto);
-
-        // Egresos (notaría, impuestos, terceros)
-        const egresado = exp.movimientosFinancieros
-          .filter((m) => m.naturaleza === 'EGRESO' && ['VALIDADO', 'RECIBIDO'].includes(m.estatus))
-          .reduce((sum, m) => sum + Number(m.monto), 0);
-
-        // Notaría y terceros presupuestados (total_notaria)
-        const pendienteEgresos = Math.max(0, totalNotaria - egresado);
+        const activeMovements = exp.movimientosFinancieros.filter((m) => ['VALIDADO', 'RECIBIDO'].includes(m.estatus));
+        const ledgerMovements = activeMovements.length > 0
+          ? activeMovements.map((movement) => ({ ...movement, monto: Number(movement.monto) }))
+          : exp.pagos
+              .filter((payment) => ['VALIDADO', 'RECIBIDO'].includes(payment.estatus))
+              .map((payment) => ({
+                naturaleza: 'INGRESO' as const,
+                categoria: ['HONORARIOS_RECIBIDOS', 'INGRESO_REAL_RECIBIDO'].includes(payment.categoria_ingreso)
+                  ? 'HONORARIOS_PRAVIA'
+                  : 'CLIENTE_FONDOS',
+                tipo_movimiento: 'ABONO',
+                monto: Number(payment.monto),
+                estatus: payment.estatus,
+              }));
+        const position = calculateFinancialPosition({
+          totalCliente: totalPresupuestado,
+          participacionPravia,
+          movements: ledgerMovements,
+        });
+        const cobradoNeto = position.recibido_cliente_neto;
+        const saldoPendiente = position.saldo_cliente;
+        const egresado = position.egresos_terceros + position.egresos_pravia;
+        const pendienteEgresos = position.saldo_terceros;
 
         // Participación PRAVIA (Honorarios presupuestados)
         const praviaTotal = participacionPravia;
@@ -132,12 +131,8 @@ export class FinanzasController {
 
         const honorariosGenerados = esFirmado ? praviaTotal : 0;
 
-        // Honorarios efectivamente cobrados por PRAVIA
-        let ingresoRealHonorarios = 0;
-        if (praviaTotal > 0 && totalPresupuestado > 0) {
-          const proporcion = Math.min(1, cobradoNeto / totalPresupuestado);
-          ingresoRealHonorarios = Math.round(praviaTotal * proporcion * 100) / 100;
-        }
+        // El ingreso PRAVIA solo existe cuando el movimiento fue clasificado explícitamente.
+        const ingresoRealHonorarios = position.honorarios_pravia_recibidos;
 
         // Estado Financiero exacto del expediente
         let estadoFinanciero:
@@ -202,6 +197,10 @@ export class FinanzasController {
           saldo_pendiente: saldoPendiente,
           total_egresado: egresado,
           pendiente_egresos: pendienteEgresos,
+          saldo_terceros: position.saldo_terceros,
+          fondos_retenidos: position.fondos_retenidos,
+          utilidad_pravia: position.utilidad_pravia,
+          egresos_pravia: position.egresos_pravia,
           honorarios_generados: honorariosGenerados,
           ingreso_real_honorarios: ingresoRealHonorarios,
           estado_financiero: estadoFinanciero,
@@ -276,6 +275,9 @@ export class FinanzasController {
         pendiente_cobro: itemsFinancieros.reduce((sum, item) => sum + item.saldo_pendiente, 0),
         egresos_realizados: itemsFinancieros.reduce((sum, item) => sum + item.total_egresado, 0),
         pendiente_pago: itemsFinancieros.reduce((sum, item) => sum + item.pendiente_egresos, 0),
+        saldo_terceros: itemsFinancieros.reduce((sum, item) => sum + item.saldo_terceros, 0),
+        fondos_retenidos: itemsFinancieros.reduce((sum, item) => sum + item.fondos_retenidos, 0),
+        utilidad_pravia: itemsFinancieros.reduce((sum, item) => sum + item.utilidad_pravia, 0),
         participacion_pravia: itemsFinancieros.reduce((sum, item) => sum + item.participacion_pravia, 0),
         total_presupuestado_general: itemsFinancieros.reduce((sum, item) => sum + item.total_presupuestado, 0)
       };
@@ -432,7 +434,7 @@ export class FinanzasController {
               }
             }
           },
-          movimientosFinancieros: { where: { naturaleza: 'INGRESO', estatus: { in: ['VALIDADO', 'RECIBIDO'] } } },
+          movimientosFinancieros: true,
           pagos: { where: { estatus: { in: ['VALIDADO', 'RECIBIDO'] } } }
         },
         orderBy: { created_at: 'desc' }
@@ -442,13 +444,28 @@ export class FinanzasController {
 
       let cobranzaList = expedientes
         .map((exp) => {
-          const { totalPresupuestado } = getOperationalBudget(exp);
-
-          const cobradoMovs = exp.movimientosFinancieros.reduce((sum, m) => sum + Number(m.monto), 0);
-          const cobradoPagos = exp.pagos.reduce((sum, p) => sum + Number(p.monto), 0);
-          const cobrado = cobradoMovs > 0 ? cobradoMovs : cobradoPagos;
-
-          const saldo = Math.max(0, totalPresupuestado - cobrado);
+          const { totalPresupuestado, participacionPravia } = getOperationalBudget(exp);
+          const activeMovements = exp.movimientosFinancieros.filter((m) =>
+            ['VALIDADO', 'RECIBIDO'].includes(m.estatus),
+          );
+          const ledgerMovements = activeMovements.length > 0
+            ? activeMovements.map((movement) => ({ ...movement, monto: Number(movement.monto) }))
+            : exp.pagos.map((payment) => ({
+                naturaleza: 'INGRESO' as const,
+                categoria: ['HONORARIOS_RECIBIDOS', 'INGRESO_REAL_RECIBIDO'].includes(payment.categoria_ingreso)
+                  ? 'HONORARIOS_PRAVIA'
+                  : 'CLIENTE_FONDOS',
+                tipo_movimiento: 'ABONO',
+                monto: Number(payment.monto),
+                estatus: payment.estatus,
+              }));
+          const position = calculateFinancialPosition({
+            totalCliente: totalPresupuestado,
+            participacionPravia,
+            movements: ledgerMovements,
+          });
+          const cobrado = position.recibido_cliente_neto;
+          const saldo = position.saldo_cliente;
 
           if (saldo <= 0) return null; // Solo pendientes de cobro
 
@@ -545,6 +562,7 @@ export class FinanzasController {
       const egresosMovs = await prisma.movimientoFinanciero.findMany({
         where: {
           naturaleza: 'EGRESO',
+          estatus: { in: ['VALIDADO', 'RECIBIDO'] },
           ...(categoria && typeof categoria === 'string' && categoria !== 'TODOS' ? { categoria } : {})
         },
         include: {
@@ -650,9 +668,12 @@ export class FinanzasController {
           participacionPravia: praviaTotal
         } = getOperationalBudget(exp);
 
-        const cobradoMovs = exp.movimientosFinancieros.reduce((sum, m) => sum + Number(m.monto), 0);
-        const proporcion = totalCliente > 0 ? Math.min(1, cobradoMovs / totalCliente) : 0;
-        const praviaCobrado = Math.round(praviaTotal * proporcion * 100) / 100;
+        const position = calculateFinancialPosition({
+          totalCliente,
+          participacionPravia: praviaTotal,
+          movements: exp.movimientosFinancieros.map((movement) => ({ ...movement, monto: Number(movement.monto) })),
+        });
+        const praviaCobrado = position.honorarios_pravia_recibidos;
 
         const esFirmado = !!(
           exp.fecha_real_firma ||

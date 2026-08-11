@@ -7,7 +7,6 @@ import {
   transitionEstatus,
   addMovimientoFinanciero,
   reverseMovimientoFinanciero,
-  deleteMovimientoFinanciero,
   updateMovimientoAdjunto,
   uploadMulter,
   uploadDocumentoMulter,
@@ -52,7 +51,6 @@ router.post('/:id/transicion-estatus', transitionEstatus);
 // Financial movements
 router.post('/:id/movimientos', addMovimientoFinanciero);
 router.post('/:id/movimientos/:movimientoId/revertir', reverseMovimientoFinanciero);
-router.delete('/:id/movimientos/:movimientoId', deleteMovimientoFinanciero);
 router.patch('/:id/movimientos/:movimientoId/adjunto', updateMovimientoAdjunto);
 router.post('/:id/movimientos/:movimientoId/adjuntos/upload', uploadMulter.single('file'), uploadMovimientoAdjuntoFile);
 router.get('/:id/movimientos/:movimientoId/adjuntos/:tipo/visualizar', streamMovimientoAdjunto);

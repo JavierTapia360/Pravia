@@ -1690,7 +1690,11 @@ export default function ExpedienteDetail() {
 
           {/* PESTAÑA: FINANZAS Y MOVIMIENTOS RECONSTRUIDA */}
           {activeTab === 'finanzas' && (
-            <ExpedienteFinanzasTab expedienteId={exp.id} onUpdate={loadData} />
+            <ExpedienteFinanzasTab
+              expedienteId={exp.id}
+              actorUserId={abogadoId || exp.abogado_id || ''}
+              onUpdate={loadData}
+            />
           )}
 
           {/* PESTAÑA: BITÁCORA */}

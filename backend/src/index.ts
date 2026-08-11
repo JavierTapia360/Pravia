@@ -15,6 +15,7 @@ import comparecienteAltaSessionRoutes from './routes/comparecienteAltaSession.ro
 import finanzasRoutes from './routes/finanzas.routes';
 
 const app = express();
+app.disable('etag');
 const PORT = process.env.PORT || 3001;
 const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://localhost:5175')
   .split(',')
@@ -36,6 +37,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   const startedAt = Date.now();
   (req as Request & { correlationId: string }).correlationId = correlationId;
   res.setHeader('x-correlation-id', correlationId);
+  if (req.path.startsWith('/api/')) {
+    res.setHeader('Cache-Control', 'no-store');
+  }
 
   res.on('finish', () => {
     console.log(JSON.stringify({
