@@ -1,8 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import MainLayout from './components/layout/MainLayout';
-import { EmptyState, LoadingState } from './components/ui/AsyncState';
-import { Calendar, ShieldAlert } from 'lucide-react';
+import { LoadingState } from './components/ui/AsyncState';
 
 const MiDia = lazy(() => import('./pages/MiDia'));
 const Prospectos = lazy(() => import('./pages/Prospectos'));
@@ -20,6 +19,7 @@ const Finanzas = lazy(() => import('./pages/Finanzas'));
 const Agenda = lazy(() => import('./pages/Agenda'));
 const Reportes = lazy(() => import('./pages/Reportes'));
 const Inteligencia = lazy(() => import('./pages/Inteligencia'));
+const Riesgos = lazy(() => import('./pages/Riesgos'));
 const Login = lazy(() => import('./pages/Login'));
 
 // Zustand store for quick auth check (will build robustly later)
@@ -45,14 +45,6 @@ const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   return children;
 };
-
-function ModulePlaceholder({ title, description, icon }: { title: string; description: string; icon: typeof Calendar }) {
-  return (
-    <div style={{ maxWidth: '960px', margin: '0 auto' }}>
-      <EmptyState title={title} description={description} icon={icon} />
-    </div>
-  );
-}
 
 import { ToastContainer } from './components/ui/ToastContainer';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
@@ -89,7 +81,7 @@ function App() {
             <Route path="agenda" element={<Agenda />} />
             <Route path="reportes" element={<Reportes />} />
             <Route path="inteligencia" element={<Inteligencia />} />
-            <Route path="riesgos" element={<ModulePlaceholder title="Riesgos y cumplimiento" description="El centro UIF e ISR se habilitará con reglas verificables, alertas explicables y permisos por rol." icon={ShieldAlert} />} />
+            <Route path="riesgos" element={<Riesgos />} />
           </Route>
           </Routes>
         </Suspense>

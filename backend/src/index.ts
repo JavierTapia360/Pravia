@@ -18,6 +18,7 @@ import agendaRoutes from './routes/agenda.routes';
 import reportesRoutes from './routes/reportes.routes';
 import miDiaRoutes from './routes/miDia.routes';
 import aiRoutes from './routes/ai.routes';
+import complianceRoutes from './routes/compliance.routes';
 
 const app = express();
 app.disable('etag');
@@ -199,6 +200,7 @@ app.use('/api/agenda', agendaRoutes);
 app.use('/api/reportes', reportesRoutes);
 app.use('/api/mi-dia', miDiaRoutes);
 app.use('/api/ia', aiRoutes);
+app.use('/api/cumplimiento', complianceRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {

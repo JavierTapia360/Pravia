@@ -24,22 +24,27 @@ model User {
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
 
-  expedientes              Expediente[]            @relation("ExpedienteAbogado")
-  expedientesGestor        Expediente[]            @relation("ExpedienteGestor")
-  expedientesCreados       Expediente[]            @relation("ExpedienteCreador")
-  expedientesArchivados    Expediente[]            @relation("ExpedienteArchivedBy")
-  prospectos               Prospecto[]
-  archivedProspectos       Prospecto[]             @relation("ProspectoArchivedBy")
-  notas                    Nota[]
-  eventos                  EventoAgenda[]          @relation("EventoResponsable")
-  eventosCancelados        EventoAgenda[]          @relation("EventoCanceladoPor")
-  aiUsageLogs              AIUsageLog[]
-  auditLogs                AuditLog[]
-  cotizaciones             Cotizacion[]
-  comunicaciones           Comunicacion[]
-  seguimientosProspectos   ProspectoSeguimiento[]
-  seguimientosCotizaciones CotizacionSeguimiento[]
-  documentosSubidos        Documento[]
+  expedientes               Expediente[]            @relation("ExpedienteAbogado")
+  expedientesGestor         Expediente[]            @relation("ExpedienteGestor")
+  expedientesCreados        Expediente[]            @relation("ExpedienteCreador")
+  expedientesArchivados     Expediente[]            @relation("ExpedienteArchivedBy")
+  prospectos                Prospecto[]
+  archivedProspectos        Prospecto[]             @relation("ProspectoArchivedBy")
+  notas                     Nota[]
+  eventos                   EventoAgenda[]          @relation("EventoResponsable")
+  eventosCancelados         EventoAgenda[]          @relation("EventoCanceladoPor")
+  aiUsageLogs               AIUsageLog[]
+  complianceRulesCreated    ComplianceRuleSet[]     @relation("ComplianceRuleCreator")
+  complianceRulesApproved   ComplianceRuleSet[]     @relation("ComplianceRuleApprover")
+  complianceReviewsCreated  ComplianceReview[]      @relation("ComplianceReviewCreator")
+  complianceReviewsReviewed ComplianceReview[]      @relation("ComplianceReviewReviewer")
+  complianceEvidenceAdded   ComplianceEvidence[]    @relation("ComplianceEvidenceAdder")
+  auditLogs                 AuditLog[]
+  cotizaciones              Cotizacion[]
+  comunicaciones            Comunicacion[]
+  seguimientosProspectos    ProspectoSeguimiento[]
+  seguimientosCotizaciones  CotizacionSeguimiento[]
+  documentosSubidos         Documento[]
 
   // Relaciones con motor operativo, finanzas, auditoría y vínculos de documentos
   formularioVersionesCreadas   FormularioVersion[]          @relation("FormularioVersionCreador")
@@ -571,6 +576,7 @@ model Expediente {
   tareas_externas            TareaExterna[]
   eventos                    EventoAgenda[]
   aiUsageLogs                AIUsageLog[]
+  complianceReviews          ComplianceReview[]
 
   @@map("expedientes")
 }
@@ -689,6 +695,7 @@ model Documento {
   datosFuente           ComparecienteDatoFuente[]
   movimientoVinculos    MovimientoDocumento[]
   comunicacionVinculos  ComunicacionDocumento[]
+  complianceEvidence    ComplianceEvidence[]
 
   instrumentosMoralSoporte PersonaMoralInstrumento[]
   identificacionesSoporte  ComparecienteIdentificacion[]
@@ -1880,6 +1887,83 @@ model AIUsageLog {
   @@index([usuario_id, created_at])
   @@index([expediente_id, created_at])
   @@map("ai_usage_logs")
+}
+
+model ComplianceRuleSet {
+  id                  String    @id @default(uuid()) @db.Uuid
+  tipo                String
+  clave               String
+  version             String
+  nombre              String
+  estatus             String    @default("BORRADOR")
+  vigencia_desde      DateTime
+  vigencia_hasta      DateTime?
+  fuente_nombre       String
+  fuente_url          String
+  fuente_publicada_at DateTime?
+  parametros          Json
+  cuestionario        Json
+  notas               String?
+  creado_por_id       String    @db.Uuid
+  aprobado_por_id     String?   @db.Uuid
+  aprobado_at         DateTime?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  creado_por   User               @relation("ComplianceRuleCreator", fields: [creado_por_id], references: [id], onDelete: Restrict)
+  aprobado_por User?              @relation("ComplianceRuleApprover", fields: [aprobado_por_id], references: [id], onDelete: SetNull)
+  revisiones   ComplianceReview[]
+
+  @@unique([tipo, clave, version])
+  @@index([tipo, estatus, vigencia_desde])
+  @@map("compliance_rule_sets")
+}
+
+model ComplianceReview {
+  id                    String    @id @default(uuid()) @db.Uuid
+  expediente_id         String    @db.Uuid
+  rule_set_id           String    @db.Uuid
+  tipo                  String
+  estatus               String    @default("BORRADOR")
+  fecha_operacion       DateTime?
+  rule_version_snapshot String
+  cuestionario_json     Json
+  resultado_json        Json?
+  explicacion           String?
+  creado_por_id         String    @db.Uuid
+  revisado_por_id       String?   @db.Uuid
+  revisado_at           DateTime?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  expediente   Expediente           @relation(fields: [expediente_id], references: [id], onDelete: Restrict)
+  ruleSet      ComplianceRuleSet    @relation(fields: [rule_set_id], references: [id], onDelete: Restrict)
+  creado_por   User                 @relation("ComplianceReviewCreator", fields: [creado_por_id], references: [id], onDelete: Restrict)
+  revisado_por User?                @relation("ComplianceReviewReviewer", fields: [revisado_por_id], references: [id], onDelete: SetNull)
+  evidencias   ComplianceEvidence[]
+
+  @@index([expediente_id, tipo])
+  @@index([estatus, created_at])
+  @@map("compliance_reviews")
+}
+
+model ComplianceEvidence {
+  id              String   @id @default(uuid()) @db.Uuid
+  review_id       String   @db.Uuid
+  documento_id    String   @db.Uuid
+  tipo_evidencia  String
+  observaciones   String?
+  agregado_por_id String   @db.Uuid
+  estatus         String   @default("ACTIVO")
+  created_at      DateTime @default(now())
+
+  review       ComplianceReview @relation(fields: [review_id], references: [id], onDelete: Restrict)
+  documento    Documento        @relation(fields: [documento_id], references: [id], onDelete: Restrict)
+  agregado_por User             @relation("ComplianceEvidenceAdder", fields: [agregado_por_id], references: [id], onDelete: Restrict)
+
+  @@unique([review_id, documento_id, tipo_evidencia])
+  @@index([documento_id])
+  @@map("compliance_evidence")
 }
 
 model CargaTemporalDocumento {
