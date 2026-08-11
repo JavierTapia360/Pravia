@@ -4,6 +4,7 @@ import cors from 'cors';
 import { randomUUID } from 'crypto';
 import { configuredDatabaseSchema, prisma } from './config/prisma';
 import { BUCKET_NAME, getSupabaseClient } from './services/supabase.service';
+import { getOpenAIEscalationModelName, getOpenAIModelName } from './services/openaiDocument.service';
 
 import prospectosRoutes from './routes/prospectos.routes';
 import documentosRoutes from './routes/documentos.routes';
@@ -16,6 +17,7 @@ import finanzasRoutes from './routes/finanzas.routes';
 import agendaRoutes from './routes/agenda.routes';
 import reportesRoutes from './routes/reportes.routes';
 import miDiaRoutes from './routes/miDia.routes';
+import aiRoutes from './routes/ai.routes';
 
 const app = express();
 app.disable('etag');
@@ -112,7 +114,7 @@ app.get('/api/health', healthHandler);
 // ══════════════════════════════════════
 app.get('/api/comparecientes/ia/status', (_req: Request, res: Response) => {
   const apiKey = process.env.OPENAI_API_KEY;
-  const model = process.env.OPENAI_DOCUMENT_MODEL || process.env.AI_DOCUMENT_MODEL || 'gpt-5.4-nano';
+  const model = getOpenAIModelName();
   const provider = 'OPENAI';
 
   return res.json({
@@ -120,14 +122,14 @@ app.get('/api/comparecientes/ia/status', (_req: Request, res: Response) => {
     model_configured: !!(model && model.trim().length > 0),
     api_key_configured: !!(apiKey && apiKey.trim().length > 0),
     model,
-    escalation_model: process.env.OPENAI_ESCALATION_MODEL || 'gpt-5.4-mini',
+    escalation_model: getOpenAIEscalationModelName(),
     reasoning_effort: process.env.OPENAI_REASONING_EFFORT || 'high',
   });
 });
 
 if (process.env.NODE_ENV !== 'production') app.get('/api/debug/openai', async (_req: Request, res: Response) => {
   const apiKey = (process.env.OPENAI_API_KEY || '').trim();
-  const model = (process.env.OPENAI_DOCUMENT_MODEL || process.env.AI_DOCUMENT_MODEL || 'gpt-5.4-nano').trim();
+  const model = getOpenAIModelName();
 
   if (!apiKey) {
     return res.status(503).json({
@@ -196,6 +198,7 @@ app.use('/api/finanzas', finanzasRoutes);
 app.use('/api/agenda', agendaRoutes);
 app.use('/api/reportes', reportesRoutes);
 app.use('/api/mi-dia', miDiaRoutes);
+app.use('/api/ia', aiRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {

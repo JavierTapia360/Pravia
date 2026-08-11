@@ -10,6 +10,8 @@ import PizZip from 'pizzip';
 import { Prisma } from '@prisma/client';
 import { deleteFile, downloadFile, uploadFile } from '../services/supabase.service';
 import { analizarProyectoNotarialConOpenAI, DocumentoParaExtraccion } from '../services/openaiDocument.service';
+import { getOpenAIEscalationModelName } from '../services/openaiDocument.service';
+import { recordAIFailure, recordAIUsages } from '../services/aiUsage.service';
 import prisma from '../config/prisma';
 
 const PROYECTOS_DIR = path.join(__dirname, '../../uploads/proyectos');
@@ -418,11 +420,15 @@ export const downloadProyectoVersion = async (req: Request, res: Response) => {
 
 // 6. ANALIZAR CON IA & GENERAR REPORTE WORD (.docx)
 export const analizarProyectoConIA = async (req: Request, res: Response) => {
+  const aiStartedAt = Date.now();
+  let aiRequestStarted = false;
+  let usageUserId: string | undefined;
   try {
     const { id } = req.params;
 
     let userId = (req as any).user?.id || req.body.usuario_id;
-    let userName = 'Javier Concordia';
+    usageUserId = userId;
+    let userName = 'Usuario no identificado';
 
     if (userId) {
       const u = await prisma.user.findUnique({ where: { id: userId } });
@@ -491,6 +497,7 @@ export const analizarProyectoConIA = async (req: Request, res: Response) => {
       });
     }
 
+    aiRequestStarted = true;
     const resultadoIA = await analizarProyectoNotarialConOpenAI(
       {
         buffer: projectBuffer,
@@ -501,6 +508,14 @@ export const analizarProyectoConIA = async (req: Request, res: Response) => {
       },
       documentosParaIA
     );
+    await recordAIUsages(resultadoIA.uso ? [resultadoIA.uso] : [], {
+      operacion: 'REVISION_PROYECTO_ESCRITURA',
+      usuarioId: userId,
+      expedienteId: id,
+      escalamientoMotivo: 'Revisión jurídica documental compleja',
+      metadata: { proyecto_version_id: vigente.id, documentos_fuente: documentosParaIA.map((item) => item.documentoId) },
+    }).catch((usageError) => console.error('[AI usage] No fue posible registrar el consumo:', usageError.message));
+    aiRequestStarted = false;
 
     const observaciones = resultadoIA.observaciones.map((observacion, index) => ({
       id: `obs_${index + 1}`,
@@ -664,6 +679,16 @@ export const analizarProyectoConIA = async (req: Request, res: Response) => {
 
     res.status(201).json(reportRecord);
   } catch (error: any) {
+    if (aiRequestStarted) {
+      await recordAIFailure({
+        operacion: 'REVISION_PROYECTO_ESCRITURA',
+        modelo: getOpenAIEscalationModelName(),
+        usuarioId: usageUserId,
+        expedienteId: req.params.id,
+        durationMs: Date.now() - aiStartedAt,
+        errorCode: error.code || 'AI_PROJECT_REVIEW_FAILED',
+      }).catch(() => undefined);
+    }
     res.status(500).json({ error: 'Error al ejecutar análisis de IA', detail: error.message });
   }
 };

@@ -343,7 +343,7 @@ export class AgendaController {
             user_id: responsableId,
             expediente_id: links.expedienteId,
             compareciente_id: links.comparecienteId,
-            recordatorios: req.body.recordatorios === undefined ? current.recordatorios : normalizeReminders(req.body.recordatorios),
+            ...(req.body.recordatorios === undefined ? {} : { recordatorios: normalizeReminders(req.body.recordatorios) }),
             estatus,
           },
           include: eventInclude,

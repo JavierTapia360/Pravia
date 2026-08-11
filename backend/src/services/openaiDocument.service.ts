@@ -43,6 +43,7 @@ export interface DocumentExtractionResult {
   actividades_economicas?: Array<{ actividad: string; porcentaje?: string; tipo?: string }>;
   regimenes?: string[];
   uso?: AIUsageMetrics;
+  usos?: AIUsageMetrics[];
 }
 
 export interface DocumentoParaExtraccion {
@@ -173,7 +174,13 @@ export function autoridadPorTipoDocumento(tipoDoc: string): string | null {
  * Retorna el modelo de OpenAI utilizado para análisis documental.
  */
 export function getOpenAIModelName(): string {
-  return (process.env.OPENAI_DOCUMENT_MODEL || process.env.AI_DOCUMENT_MODEL || 'gpt-5.4-nano').trim();
+  const configured = (process.env.OPENAI_DOCUMENT_MODEL || process.env.AI_DOCUMENT_MODEL || '').trim();
+  return /^gpt-5\.4-nano(?:-|$)/.test(configured) ? configured : 'gpt-5.4-nano';
+}
+
+export function getOpenAIEscalationModelName(): string {
+  const configured = (process.env.OPENAI_ESCALATION_MODEL || '').trim();
+  return /^gpt-5\.4-mini(?:-|$)/.test(configured) ? configured : 'gpt-5.4-mini';
 }
 
 function getReasoningEffort(): 'none' | 'low' | 'medium' | 'high' | 'xhigh' {
@@ -235,11 +242,12 @@ function buildUsageMetrics(
  * Mensaje de error: "No fue posible ejecutar la extracción documental con IA.
  * Los campos permanecen sin cambios."
  */
-export async function extraerMultiplesDocumentos(
-  documentos: DocumentoParaExtraccion[]
+async function executeDocumentExtraction(
+  documentos: DocumentoParaExtraccion[],
+  model: string,
+  escalated = false
 ): Promise<DocumentExtractionResult> {
   const apiKey = process.env.OPENAI_API_KEY;
-  const model = getOpenAIModelName();
 
   if (!apiKey) {
     throw new Error('La clave de API de OpenAI no está configurada.');
@@ -544,7 +552,53 @@ No agregues texto antes ni después del JSON.`;
     domicilios_detectados: parsed.domicilios_detectados || [],
     actividades_economicas: parsed.actividades_economicas || [],
     regimenes: parsed.regimenes || [],
-    uso: buildUsageMetrics(data, model, startedAt, documentos.length),
+    uso: buildUsageMetrics(data, model, startedAt, documentos.length, escalated),
+  };
+}
+
+function escalationCandidates(result: DocumentExtractionResult) {
+  const byField = new Map<string, ExtractedField[]>();
+  const documentIds = new Set<string>();
+  const reasons: string[] = [];
+  for (const field of result.campos) {
+    const list = byField.get(field.campo) || [];
+    list.push(field);
+    byField.set(field.campo, list);
+    if (field.confianza !== 'LECTURA_CLARA') {
+      reasons.push(`lectura ${field.confianza.toLowerCase()} en ${field.campo}`);
+      if (field.documento_id) documentIds.add(field.documento_id);
+    }
+  }
+  for (const [fieldName, fields] of byField) {
+    const values = new Set(fields.map((field) => field.valor.trim().toUpperCase()).filter(Boolean));
+    if (values.size > 1) {
+      reasons.push(`fuentes contradictorias para ${fieldName}`);
+      for (const field of fields) if (field.documento_id) documentIds.add(field.documento_id);
+    }
+  }
+  return { required: reasons.length > 0, reasons: [...new Set(reasons)], documentIds: [...documentIds] };
+}
+
+export async function extraerMultiplesDocumentos(
+  documentos: DocumentoParaExtraccion[]
+): Promise<DocumentExtractionResult> {
+  const primary = await executeDocumentExtraction(documentos, getOpenAIModelName(), false);
+  const escalation = escalationCandidates(primary);
+  const escalationEnabled = String(process.env.AI_ESCALATION_ENABLED || 'true').toLowerCase() !== 'false';
+  if (!escalation.required || !escalationEnabled) return { ...primary, usos: primary.uso ? [primary.uso] : [] };
+
+  const selected = escalation.documentIds.length
+    ? documentos.filter((document) => escalation.documentIds.includes(document.documentoId)).slice(0, 4)
+    : documentos.slice(0, 4);
+  const escalated = await executeDocumentExtraction(selected, getOpenAIEscalationModelName(), true);
+  return {
+    ...escalated,
+    alertas: [
+      ...primary.alertas,
+      ...escalated.alertas,
+      `Revisión escalada por: ${escalation.reasons.join('; ')}.`,
+    ],
+    usos: [primary.uso, escalated.uso].filter((usage): usage is AIUsageMetrics => Boolean(usage)),
   };
 }
 
@@ -553,7 +607,7 @@ export async function analizarProyectoNotarialConOpenAI(
   documentosSoporte: DocumentoParaExtraccion[]
 ): Promise<ProyectoAnalysisResult> {
   const apiKey = process.env.OPENAI_API_KEY;
-  const model = getOpenAIModelName();
+  const model = getOpenAIEscalationModelName();
   const startedAt = Date.now();
   if (!apiKey) throw new Error('La clave de API de OpenAI no está configurada.');
 
@@ -686,7 +740,7 @@ export async function analizarProyectoNotarialConOpenAI(
     resumen_ejecutivo: parsed.resumen_ejecutivo || '',
     observaciones: Array.isArray(parsed.observaciones) ? parsed.observaciones : [],
     documentos_no_leidos: documentosNoLeidos,
-    uso: buildUsageMetrics(data, model, startedAt, 1 + documentosSoporte.length),
+    uso: buildUsageMetrics(data, model, startedAt, 1 + documentosSoporte.length, true),
   };
 }
 

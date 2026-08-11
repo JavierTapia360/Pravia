@@ -33,6 +33,7 @@ model User {
   notas                    Nota[]
   eventos                  EventoAgenda[]          @relation("EventoResponsable")
   eventosCancelados        EventoAgenda[]          @relation("EventoCanceladoPor")
+  aiUsageLogs              AIUsageLog[]
   auditLogs                AuditLog[]
   cotizaciones             Cotizacion[]
   comunicaciones           Comunicacion[]
@@ -569,6 +570,7 @@ model Expediente {
   etapas                     ExpedienteEtapa[]          @relation("ExpedienteEtapasLista")
   tareas_externas            TareaExterna[]
   eventos                    EventoAgenda[]
+  aiUsageLogs                AIUsageLog[]
 
   @@map("expedientes")
 }
@@ -1838,11 +1840,46 @@ model ComparecienteAltaSession {
   usuario          User                     @relation("ComparecienteAltaSessionUsuario", fields: [usuario_id], references: [id], onDelete: Restrict)
   origenExpediente Expediente?              @relation("ComparecienteAltaSessionOrigenExpediente", fields: [origen_expediente_id], references: [id], onDelete: SetNull)
   cargasTemporales CargaTemporalDocumento[]
+  aiUsageLogs      AIUsageLog[]
 
   @@unique([usuario_id, idempotency_key])
   @@index([usuario_id, estatus])
   @@index([expires_at])
   @@map("compareciente_alta_sessions")
+}
+
+model AIUsageLog {
+  id                            String   @id @default(uuid()) @db.Uuid
+  provider                      String   @default("OPENAI")
+  modelo                        String
+  operacion                     String
+  estatus                       String   @default("COMPLETADO")
+  usuario_id                    String?  @db.Uuid
+  expediente_id                 String?  @db.Uuid
+  compareciente_alta_session_id String?  @db.Uuid
+  input_tokens                  Int      @default(0)
+  cached_input_tokens           Int      @default(0)
+  output_tokens                 Int      @default(0)
+  reasoning_tokens              Int      @default(0)
+  total_tokens                  Int      @default(0)
+  duracion_ms                   Int      @default(0)
+  costo_estimado_usd            Decimal  @default(0) @db.Decimal(12, 6)
+  documentos_enviados           Int      @default(0)
+  escalamiento_utilizado        Boolean  @default(false)
+  escalamiento_motivo           String?
+  error_codigo                  String?
+  metadata                      Json?
+  created_at                    DateTime @default(now())
+
+  usuario                  User?                     @relation(fields: [usuario_id], references: [id], onDelete: SetNull)
+  expediente               Expediente?               @relation(fields: [expediente_id], references: [id], onDelete: SetNull)
+  comparecienteAltaSession ComparecienteAltaSession? @relation(fields: [compareciente_alta_session_id], references: [id], onDelete: SetNull)
+
+  @@index([created_at])
+  @@index([modelo, created_at])
+  @@index([usuario_id, created_at])
+  @@index([expediente_id, created_at])
+  @@map("ai_usage_logs")
 }
 
 model CargaTemporalDocumento {
