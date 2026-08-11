@@ -69,6 +69,7 @@ La IA pagada está apagada por defecto para proteger el presupuesto. Solo se eje
 - mayor chunk: reportes, 108.68 KiB gzip, debajo del presupuesto de 140 KiB;
 - CSS: 18.57 KiB gzip, debajo del presupuesto de 30 KiB;
 - PWA verificada;
+- smoke público aprobado: rutas privadas redirigen a login y recuperación es accesible; tramo autenticado queda pendiente de credenciales válidas;
 - imágenes de backend (Node 22 + OpenSSL) y frontend/Nginx construidas correctamente con Docker;
 - escaneo actual sin secretos no reconocidos; existe una huella histórica reconocida de un antiguo valor de desarrollo y se exige no reutilizarlo/rotarlo.
 

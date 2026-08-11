@@ -19,8 +19,13 @@ const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage();
 const failures = [];
 page.on('console', (message) => {
-  if (message.type() === 'error') failures.push(`console:${message.text().slice(0, 180)}`);
+  // Chrome duplica como error de consola los 401/403 esperados de refresh sin sesión.
+  // Las respuestas API 5xx se vigilan por URL/estado en el listener inferior.
+  if (message.type() === 'error' && !message.text().startsWith('Failed to load resource:')) {
+    failures.push(`console:${message.text().slice(0, 180)}`);
+  }
 });
+page.on('pageerror', (error) => failures.push(`page:${error.message.slice(0, 180)}`));
 page.on('response', (response) => {
   if (response.url().includes('/api/') && response.status() >= 500) failures.push(`api:${response.status()}:${response.url()}`);
 });
