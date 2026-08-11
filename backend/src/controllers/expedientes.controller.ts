@@ -18,6 +18,7 @@ import {
   normalizeFinancialCategory,
   validateMovementSemantics,
 } from '../domain/financialLedger';
+import { expedienteAccessWhere } from '../middleware/auth.middleware';
 
 const cotizacionConversionService = new CotizacionConversionService(prisma);
 
@@ -37,7 +38,8 @@ export const getExpedientes = async (req: Request, res: Response) => {
     const { estatus, abogado_id, tipo_acto_id, search, limit = 50, page = 1 } = req.query;
 
     const where: any = {
-      archived_at: null
+      archived_at: null,
+      AND: req.user ? [expedienteAccessWhere(req.user)] : [],
     };
 
     if (estatus) {
@@ -54,11 +56,11 @@ export const getExpedientes = async (req: Request, res: Response) => {
 
     if (search) {
       const searchStr = String(search).trim();
-      where.OR = [
+      where.AND.push({ OR: [
         { numero_pravia: { contains: searchStr, mode: 'insensitive' } },
         { numero_notaria: { contains: searchStr, mode: 'insensitive' } },
         { cliente_alias: { contains: searchStr, mode: 'insensitive' } }
-      ];
+      ] });
     }
 
     const take = Number(limit);
@@ -86,8 +88,9 @@ export const getExpedientes = async (req: Request, res: Response) => {
       prisma.expediente.count({ where })
     ]);
 
+    const canReadFinance = req.user?.permissions.includes('finanzas.read');
     res.json({
-      data: expedientes,
+      data: expedientes.map((item) => canReadFinance ? item : { ...item, valor_operacion: null, _count: { ...item._count, movimientosFinancieros: 0 } }),
       meta: {
         total,
         page: Number(page),
@@ -198,8 +201,10 @@ export const getExpedienteById = async (req: Request, res: Response) => {
       (stage) => stage.estado_general_relacionado === expediente.estatus && stage.orden > currentStageOrder,
     ) || null;
 
+    const canReadFinance = req.user?.permissions.includes('finanzas.read');
     res.json({
       ...expediente,
+      ...(canReadFinance ? {} : { valor_operacion: null, movimientosFinancieros: [], financial_access: false }),
       workflow: {
         current_status_label: EXPEDIENTE_STATUS_LABELS[expediente.estatus],
         transitions,
@@ -225,9 +230,10 @@ export const createExpediente = async (req: Request, res: Response) => {
       datos_operacion
     } = req.body;
 
-    const creador_id = (req as any).user?.id || abogado_id;
+    const creador_id = req.user?.id || abogado_id;
+    const assignedLawyerId = req.user?.rol === 'ABOGADO' ? req.user.id : abogado_id;
 
-    if (!tipo_acto_id || !abogado_id || !cliente_alias) {
+    if (!tipo_acto_id || !assignedLawyerId || !cliente_alias) {
       return res.status(400).json({ error: 'Campos obligatorios requeridos: tipo_acto_id, abogado_id, cliente_alias' });
     }
 
@@ -256,7 +262,7 @@ export const createExpediente = async (req: Request, res: Response) => {
           formulario_version_id: formVer?.id,
           flujo_version_id: flujoVer?.id,
           plantilla_doc_version_id: plantDocVer?.id,
-          abogado_id,
+          abogado_id: assignedLawyerId,
           creador_id,
           cliente_alias,
           descripcion,
@@ -278,7 +284,7 @@ export const createExpediente = async (req: Request, res: Response) => {
             nombre_snapshot: primera.nombre,
             orden_snapshot: primera.orden || 1,
             duracion_esperada_snapshot: primera.dias || 3,
-            responsable_id: abogado_id
+            responsable_id: assignedLawyerId
           }
         });
 

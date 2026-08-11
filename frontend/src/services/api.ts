@@ -1,5 +1,6 @@
 // Same-origin by default: Vite proxies `/api` in development and production can
 // either serve both layers together or set VITE_API_URL explicitly.
+import { getAccessToken, refreshAccessToken } from './authToken';
 const API_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 
 class ApiError extends Error {
@@ -18,54 +19,60 @@ const handleResponse = async (res: globalThis.Response) => {
   return body;
 };
 
+const request = async (endpoint: string, init: RequestInit = {}, retry = true): Promise<any> => {
+  const token = getAccessToken();
+  const headers = new Headers(init.headers || {});
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(`${API_URL}${endpoint}`, { ...init, headers, credentials: 'include' });
+  if (response.status === 401 && retry && !endpoint.startsWith('/auth/')) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) return request(endpoint, init, false);
+  }
+  return handleResponse(response);
+};
+
 export const api = {
   get: async (endpoint: string) => {
-    const response = await fetch(`${API_URL}${endpoint}`);
-    return handleResponse(response);
+    return request(endpoint);
   },
   
   post: async (endpoint: string, data: any) => {
-    const response = await fetch(`${API_URL}${endpoint}`, {
+    return request(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    return handleResponse(response);
   },
   
   put: async (endpoint: string, data: any) => {
-    const response = await fetch(`${API_URL}${endpoint}`, {
+    return request(endpoint, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    return handleResponse(response);
   },
 
   patch: async (endpoint: string, data: any) => {
-    const response = await fetch(`${API_URL}${endpoint}`, {
+    return request(endpoint, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    return handleResponse(response);
   },
   
   delete: async (endpoint: string, data?: any) => {
-    const response = await fetch(`${API_URL}${endpoint}`, {
+    return request(endpoint, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: data ? JSON.stringify(data) : undefined
     });
-    return handleResponse(response);
   },
 
   upload: async (endpoint: string, formData: FormData) => {
-    const response = await fetch(`${API_URL}${endpoint}`, {
+    return request(endpoint, {
       method: 'POST',
       body: formData
     });
-    return handleResponse(response);
   }
 };
 

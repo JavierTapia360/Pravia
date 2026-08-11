@@ -2,8 +2,9 @@ import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import prisma from '../config/prisma';
 import { assessIsrCompleteness, ComplianceError, evaluateUif } from '../domain/compliance';
+import { expedienteAccessWhere } from '../middleware/auth.middleware';
 
-const actorFrom = (req: Request) => (req as any).user?.id || req.body?.actor_user_id;
+const actorFrom = (req: Request) => req.user?.id;
 
 async function activeUser(value: unknown) {
   if (!value) throw new ComplianceError('El usuario responsable es obligatorio.', 'COMPLIANCE_ACTOR_REQUIRED', 401);
@@ -21,14 +22,16 @@ const reviewInclude = {
 };
 
 export class ComplianceController {
-  static async catalogs(_req: Request, res: Response) {
+  static async catalogs(req: Request, res: Response) {
     try {
+      if (!req.user) throw new ComplianceError('Inicia sesión para continuar.', 'AUTH_REQUIRED', 401);
+      const access = expedienteAccessWhere(req.user);
       const [rules, expedientes, users, documents] = await Promise.all([
         prisma.complianceRuleSet.findMany({ where: { estatus: { not: 'RETIRADA' } }, orderBy: [{ tipo: 'asc' }, { vigencia_desde: 'desc' }] }),
-        prisma.expediente.findMany({ where: { archived_at: null }, select: { id: true, numero_pravia: true, cliente_alias: true, estatus: true, valor_operacion: true }, orderBy: { updated_at: 'desc' }, take: 300 }),
-        prisma.user.findMany({ where: { activo: true }, select: { id: true, nombre: true, apellido: true, rol: true }, orderBy: { nombre: 'asc' } }),
+        prisma.expediente.findMany({ where: { archived_at: null, ...access }, select: { id: true, numero_pravia: true, cliente_alias: true, estatus: true, valor_operacion: true }, orderBy: { updated_at: 'desc' }, take: 300 }),
+        prisma.user.findMany({ where: { activo: true, ...(!['DIRECCION', 'ADMINISTRACION'].includes(req.user.rol) ? { id: req.user.id } : {}) }, select: { id: true, nombre: true, apellido: true, rol: true }, orderBy: { nombre: 'asc' } }),
         prisma.documento.findMany({
-          where: { OR: [{ expediente_id: { not: null } }, { expedienteVinculos: { some: { estatus: 'ACTIVO' } } }] },
+          where: { OR: [{ expediente: { is: { archived_at: null, ...access } } }, { expedienteVinculos: { some: { estatus: 'ACTIVO', expediente: { archived_at: null, ...access } } } }] },
           select: { id: true, nombre_original: true, tipo: true, estatus: true, expediente_id: true, expedienteVinculos: { where: { estatus: 'ACTIVO' }, select: { expediente_id: true } } },
           orderBy: { fecha_carga: 'desc' },
           take: 1000,
@@ -42,8 +45,10 @@ export class ComplianceController {
 
   static async list(req: Request, res: Response) {
     try {
+      if (!req.user) throw new ComplianceError('Inicia sesión para continuar.', 'AUTH_REQUIRED', 401);
       const reviews = await prisma.complianceReview.findMany({
         where: {
+          expediente: { archived_at: null, ...expedienteAccessWhere(req.user) },
           ...(req.query.tipo && req.query.tipo !== 'TODOS' ? { tipo: String(req.query.tipo) } : {}),
           ...(req.query.estatus && req.query.estatus !== 'TODOS' ? { estatus: String(req.query.estatus) } : {}),
           ...(req.query.expediente_id ? { expediente_id: String(req.query.expediente_id) } : {}),
@@ -97,7 +102,8 @@ export class ComplianceController {
   static async evaluate(req: Request, res: Response) {
     try {
       const actorId = await activeUser(actorFrom(req));
-      const current = await prisma.complianceReview.findUnique({ where: { id: req.params.id }, include: { ruleSet: true } });
+      if (!req.user) throw new ComplianceError('Inicia sesión para continuar.', 'AUTH_REQUIRED', 401);
+      const current = await prisma.complianceReview.findFirst({ where: { id: req.params.id, expediente: { archived_at: null, ...expedienteAccessWhere(req.user) } }, include: { ruleSet: true } });
       if (!current) throw new ComplianceError('Revisión no encontrada.', 'COMPLIANCE_REVIEW_NOT_FOUND', 404);
       if (current.estatus === 'CONFIRMADO') throw new ComplianceError('Una revisión confirmada no puede recalcularse silenciosamente; crea una nueva versión.', 'COMPLIANCE_REVIEW_LOCKED', 409);
       const answers = { ...((current.cuestionario_json as any) || {}), ...(req.body.cuestionario || {}) };
@@ -125,7 +131,8 @@ export class ComplianceController {
       const actorId = await activeUser(actorFrom(req));
       const decision = String(req.body.decision || '').toUpperCase();
       if (!['CONFIRMAR', 'REQUIERE_AJUSTES'].includes(decision)) throw new ComplianceError('La decisión humana no es válida.', 'COMPLIANCE_DECISION_INVALID');
-      const current = await prisma.complianceReview.findUnique({ where: { id: req.params.id } });
+      if (!req.user) throw new ComplianceError('Inicia sesión para continuar.', 'AUTH_REQUIRED', 401);
+      const current = await prisma.complianceReview.findFirst({ where: { id: req.params.id, expediente: { archived_at: null, ...expedienteAccessWhere(req.user) } } });
       if (!current) throw new ComplianceError('Revisión no encontrada.', 'COMPLIANCE_REVIEW_NOT_FOUND', 404);
       if (!current.resultado_json) throw new ComplianceError('Primero ejecuta la evaluación explicable.', 'COMPLIANCE_RESULT_REQUIRED', 409);
       const updated = await prisma.$transaction(async (tx) => {
@@ -143,7 +150,8 @@ export class ComplianceController {
   static async addEvidence(req: Request, res: Response) {
     try {
       const actorId = await activeUser(actorFrom(req));
-      const review = await prisma.complianceReview.findUnique({ where: { id: req.params.id }, select: { id: true, expediente_id: true, estatus: true } });
+      if (!req.user) throw new ComplianceError('Inicia sesión para continuar.', 'AUTH_REQUIRED', 401);
+      const review = await prisma.complianceReview.findFirst({ where: { id: req.params.id, expediente: { archived_at: null, ...expedienteAccessWhere(req.user) } }, select: { id: true, expediente_id: true, estatus: true } });
       if (!review) throw new ComplianceError('Revisión no encontrada.', 'COMPLIANCE_REVIEW_NOT_FOUND', 404);
       if (review.estatus === 'CONFIRMADO') throw new ComplianceError('La revisión está cerrada; crea una nueva revisión para agregar evidencia.', 'COMPLIANCE_REVIEW_LOCKED', 409);
       const document = await prisma.documento.findFirst({ where: { id: String(req.body.documento_id), OR: [{ expediente_id: review.expediente_id }, { expedienteVinculos: { some: { expediente_id: review.expediente_id, estatus: 'ACTIVO' } } }] }, select: { id: true } });

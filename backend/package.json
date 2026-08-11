@@ -9,6 +9,7 @@
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "check:env": "ts-node scripts/check-env.ts",
     "check:db": "ts-node scripts/verify-runtime-database.ts",
+    "auth:set-password": "ts-node scripts/set-user-password.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "seed": "ts-node prisma/seed.ts",

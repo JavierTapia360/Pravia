@@ -26,7 +26,7 @@ import {
   ChevronRight,
   Download
 } from 'lucide-react';
-import { useAuthStore } from '../App';
+import { useAuthStore } from '../stores/authStore';
 import {
   finanzasService,
   KPIFinancieroGlobal,

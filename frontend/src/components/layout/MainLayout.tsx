@@ -10,7 +10,7 @@ import {
   Search,
   X,
 } from 'lucide-react';
-import { useAuthStore } from '../../App';
+import { useAuthStore } from '../../stores/authStore';
 import { isAppRole, navigationForRole, roleLabels } from '../../config/navigation';
 import type { AppRole } from '../../config/navigation';
 

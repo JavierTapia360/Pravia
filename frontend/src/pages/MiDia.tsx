@@ -16,7 +16,7 @@ import {
   ShieldAlert,
   Users,
 } from 'lucide-react';
-import { useAuthStore } from '../App';
+import { useAuthStore } from '../stores/authStore';
 import { agendaService, AgendaTask } from '../services/agenda.service';
 import { miDiaService } from '../services/miDia.service';
 import { useToastStore } from '../stores/toastStore';

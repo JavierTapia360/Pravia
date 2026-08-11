@@ -8,7 +8,7 @@ import {
   Receipt, BadgeCheck
 } from 'lucide-react';
 import { api } from '../../services/api';
-import { useAuthStore } from '../../App';
+import { useAuthStore } from '../../stores/authStore';
 
 interface CotizacionDetailProps {
   cotizacionId: string;

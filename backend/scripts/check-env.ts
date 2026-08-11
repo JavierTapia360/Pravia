@@ -8,7 +8,7 @@ const required = [
   'DIRECT_URL',
   'SUPABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
-  'JWT_SECRET',
+  'AUTH_JWT_SECRET',
 ] as const;
 
 const optional = [
@@ -30,6 +30,11 @@ for (const key of required) {
 
 for (const key of optional) {
   console.log(`${process.env[key]?.trim() ? 'OK' : 'OPCIONAL'} ${key}`);
+}
+
+if ((process.env.AUTH_JWT_SECRET || '').length < 32) {
+  console.error('INVALIDA AUTH_JWT_SECRET: debe tener al menos 32 caracteres aleatorios.');
+  hasErrors = true;
 }
 
 for (const key of ['DATABASE_URL', 'DIRECT_URL'] as const) {

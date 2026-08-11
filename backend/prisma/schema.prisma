@@ -13,16 +13,21 @@ datasource db {
 // ═══════════════════════════════════════
 
 model User {
-  id            String   @id @default(uuid()) @db.Uuid
-  email         String   @unique
-  password_hash String
-  nombre        String
-  apellido      String
-  rol           Role     @default(ABOGADO)
-  avatar_url    String?
-  activo        Boolean  @default(true)
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  id                       String    @id @default(uuid()) @db.Uuid
+  email                    String    @unique
+  password_hash            String
+  nombre                   String
+  apellido                 String
+  rol                      Role      @default(ABOGADO)
+  avatar_url               String?
+  activo                   Boolean   @default(true)
+  password_changed_at      DateTime?
+  failed_login_attempts    Int       @default(0)
+  locked_until             DateTime?
+  last_login_at            DateTime?
+  requires_password_change Boolean   @default(true)
+  created_at               DateTime  @default(now())
+  updated_at               DateTime  @updatedAt
 
   expedientes               Expediente[]            @relation("ExpedienteAbogado")
   expedientesGestor         Expediente[]            @relation("ExpedienteGestor")
@@ -45,6 +50,8 @@ model User {
   seguimientosProspectos    ProspectoSeguimiento[]
   seguimientosCotizaciones  CotizacionSeguimiento[]
   documentosSubidos         Documento[]
+  authSessions              AuthSession[]
+  passwordResetTokens       PasswordResetToken[]
 
   // Relaciones con motor operativo, finanzas, auditoría y vínculos de documentos
   formularioVersionesCreadas   FormularioVersion[]          @relation("FormularioVersionCreador")
@@ -92,6 +99,41 @@ enum Role {
   ABOGADO
   RECEPCION
   GESTORIA
+  CONSULTA
+}
+
+model AuthSession {
+  id                 String    @id @default(uuid()) @db.Uuid
+  user_id            String    @db.Uuid
+  refresh_token_hash String    @unique
+  user_agent         String?
+  ip_address         String?
+  expires_at         DateTime
+  last_used_at       DateTime  @default(now())
+  revoked_at         DateTime?
+  revoked_reason     String?
+  rotated_from_id    String?   @db.Uuid
+  created_at         DateTime  @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, revoked_at, expires_at])
+  @@map("auth_sessions")
+}
+
+model PasswordResetToken {
+  id           String    @id @default(uuid()) @db.Uuid
+  user_id      String    @db.Uuid
+  token_hash   String    @unique
+  expires_at   DateTime
+  used_at      DateTime?
+  requested_ip String?
+  created_at   DateTime  @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, used_at, expires_at])
+  @@map("password_reset_tokens")
 }
 
 // ═══════════════════════════════════════

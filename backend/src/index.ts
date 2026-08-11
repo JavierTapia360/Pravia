@@ -19,9 +19,13 @@ import reportesRoutes from './routes/reportes.routes';
 import miDiaRoutes from './routes/miDia.routes';
 import aiRoutes from './routes/ai.routes';
 import complianceRoutes from './routes/compliance.routes';
+import authRoutes from './routes/auth.routes';
+import usersRoutes from './routes/users.routes';
+import { authenticate, authorizeByMethod, requirePasswordReady, requirePermission } from './middleware/auth.middleware';
 
 const app = express();
 app.disable('etag');
+app.disable('x-powered-by');
 const PORT = process.env.PORT || 3001;
 const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://localhost:5175')
   .split(',')
@@ -32,11 +36,20 @@ const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:51
 app.use(cors({
   origin: allowedOrigins,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Correlation-ID'],
   credentials: true,
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (process.env.NODE_ENV === 'production') res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
 
 app.use((req: Request, res: Response, next: NextFunction) => {
   const correlationId = req.header('x-correlation-id') || randomUUID();
@@ -110,10 +123,19 @@ const healthHandler = async (req: Request, res: Response) => {
 app.get('/health', healthHandler);
 app.get('/api/health', healthHandler);
 
+// Autenticación pública: solo estas operaciones aceptan solicitudes sin JWT.
+app.use('/api/auth', (req: Request, res: Response, next: NextFunction) => {
+  const origin = req.header('origin');
+  if (origin && !allowedOrigins.includes(origin)) {
+    return res.status(403).json({ code: 'ORIGIN_NOT_ALLOWED', error: 'Origen no autorizado.' });
+  }
+  return next();
+}, authRoutes);
+
 // ══════════════════════════════════════
 // Secure IA Diagnostic Endpoint (Rule 4)
 // ══════════════════════════════════════
-app.get('/api/comparecientes/ia/status', (_req: Request, res: Response) => {
+app.get('/api/comparecientes/ia/status', authenticate, requirePermission('ia.read'), (_req: Request, res: Response) => {
   const apiKey = process.env.OPENAI_API_KEY;
   const model = getOpenAIModelName();
   const provider = 'OPENAI';
@@ -128,7 +150,7 @@ app.get('/api/comparecientes/ia/status', (_req: Request, res: Response) => {
   });
 });
 
-if (process.env.NODE_ENV !== 'production') app.get('/api/debug/openai', async (_req: Request, res: Response) => {
+if (process.env.NODE_ENV !== 'production') app.get('/api/debug/openai', authenticate, requirePermission('ia.read'), async (_req: Request, res: Response) => {
   const apiKey = (process.env.OPENAI_API_KEY || '').trim();
   const model = getOpenAIModelName();
 
@@ -160,47 +182,25 @@ if (process.env.NODE_ENV !== 'production') app.get('/api/debug/openai', async (_
 });
 
 // ══════════════════════════════════════
-// Auth is intentionally unavailable until the real password/JWT flow is enabled.
-// Never issue a token that looks valid but carries no authenticated identity.
-// ══════════════════════════════════════
-app.post('/api/auth/login', (_req: Request, res: Response) => {
-  res.status(503).json({
-    code: 'AUTH_NOT_CONFIGURED',
-    error: 'La autenticación real todavía no está habilitada.',
-  });
-});
-
-// Catálogo operativo mínimo. No expone contraseñas ni atributos de autenticación.
-app.get('/api/users', async (_req: Request, res: Response) => {
-  try {
-    const users = await prisma.user.findMany({
-      where: { activo: true },
-      select: { id: true, nombre: true, apellido: true, email: true, rol: true },
-      orderBy: [{ nombre: 'asc' }, { apellido: 'asc' }],
-    });
-    res.json(users);
-  } catch (error: any) {
-    res.status(500).json({ error: 'No fue posible cargar el catálogo de usuarios.', detail: error.message });
-  }
-});
-
-// ══════════════════════════════════════
 // Feature Routes
 // ══════════════════════════════════════
-app.use('/api/prospectos', prospectosRoutes);
-app.use('/api/documentos', documentosRoutes);
-app.use('/api/notarias', notariasRoutes);
-app.use('/api/cotizaciones', cotizacionesRoutes);
-app.use('/api/expedientes', expedientesRoutes);
-app.use('/api/comparecientes/altas', comparecienteAltaSessionRoutes);
-app.use('/api/comparecientes/alta', comparecienteAltaSessionRoutes);
-app.use('/api/comparecientes', comparecientesRoutes);
-app.use('/api/finanzas', finanzasRoutes);
-app.use('/api/agenda', agendaRoutes);
-app.use('/api/reportes', reportesRoutes);
-app.use('/api/mi-dia', miDiaRoutes);
-app.use('/api/ia', aiRoutes);
-app.use('/api/cumplimiento', complianceRoutes);
+app.use('/api', authenticate);
+app.use('/api', requirePasswordReady);
+app.use('/api/users', usersRoutes);
+app.use('/api/prospectos', authorizeByMethod('prospectos.read', 'prospectos.write'), prospectosRoutes);
+app.use('/api/documentos', authorizeByMethod('documentos.read', 'documentos.write'), documentosRoutes);
+app.use('/api/notarias', authorizeByMethod('notarias.read', 'notarias.write'), notariasRoutes);
+app.use('/api/cotizaciones', authorizeByMethod('cotizaciones.read', 'cotizaciones.write'), cotizacionesRoutes);
+app.use('/api/expedientes', authorizeByMethod('expedientes.read', 'expedientes.write'), expedientesRoutes);
+app.use('/api/comparecientes/altas', authorizeByMethod('comparecientes.read', 'comparecientes.write'), comparecienteAltaSessionRoutes);
+app.use('/api/comparecientes/alta', authorizeByMethod('comparecientes.read', 'comparecientes.write'), comparecienteAltaSessionRoutes);
+app.use('/api/comparecientes', authorizeByMethod('comparecientes.read', 'comparecientes.write'), comparecientesRoutes);
+app.use('/api/finanzas', requirePermission('finanzas.read'), finanzasRoutes);
+app.use('/api/agenda', authorizeByMethod('agenda.read', 'agenda.write'), agendaRoutes);
+app.use('/api/reportes', requirePermission('reportes.read'), reportesRoutes);
+app.use('/api/mi-dia', requirePermission('mi_dia.read'), miDiaRoutes);
+app.use('/api/ia', requirePermission('ia.read'), aiRoutes);
+app.use('/api/cumplimiento', authorizeByMethod('cumplimiento.read', 'cumplimiento.write'), complianceRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {

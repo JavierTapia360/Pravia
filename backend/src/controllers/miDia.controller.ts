@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
 import { calculateFinancialPosition } from '../domain/financialLedger';
+import { expedienteAccessWhere } from '../middleware/auth.middleware';
 
 const asNumber = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -21,8 +22,14 @@ export class MiDiaController {
       const todayStart = startOfDay(now);
       const todayEnd = endOfDay(now);
       const nextWeek = endOfDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7));
-      const userId = req.query.user_id && req.query.user_id !== 'TODOS' ? String(req.query.user_id) : null;
-      const expedienteUserFilter = userId ? { OR: [{ abogado_id: userId }, { gestor_id: userId }] } : {};
+      if (!req.user) return res.status(401).json({ code: 'AUTH_REQUIRED', error: 'Inicia sesión para continuar.' });
+      const canSeeTeam = ['DIRECCION', 'ADMINISTRACION'].includes(req.user.rol);
+      const requestedUserId = req.query.user_id && req.query.user_id !== 'TODOS' ? String(req.query.user_id) : null;
+      const userId = canSeeTeam ? requestedUserId : req.user.id;
+      const expedienteUserFilter = canSeeTeam
+        ? (userId ? { OR: [{ abogado_id: userId }, { gestor_id: userId }] } : {})
+        : expedienteAccessWhere(req.user);
+      const canReadFinance = req.user.permissions.includes('finanzas.read');
 
       const [tasks, events, expedientes, quotes] = await Promise.all([
         prisma.tarea.findMany({
@@ -41,7 +48,7 @@ export class MiDiaController {
           where: { archived_at: null, ...expedienteUserFilter },
           include: {
             cotizacion: true,
-            movimientosFinancieros: true,
+            movimientosFinancieros: canReadFinance,
             requisitos_docs: {
               where: { obligatorio: true, estatus: { in: ['PENDIENTE', 'RECHAZADO', 'VENCIDO'] } },
               select: { id: true, nombre: true, estatus: true, fecha_vencimiento: true },
@@ -71,7 +78,7 @@ export class MiDiaController {
       const pendingClient = expedientes.filter((exp) => exp.estatus === 'PENDIENTE_CLIENTE');
       const pendingNotary = expedientes.filter((exp) => exp.estatus === 'PENDIENTE_NOTARIA');
       const missingDocs = expedientes.filter((exp) => exp.requisitos_docs.length > 0);
-      const collection = expedientes.map((exp) => {
+      const collection = canReadFinance ? expedientes.map((exp) => {
         const totals = budget(exp);
         const position = calculateFinancialPosition({
           totalCliente: totals.total,
@@ -79,7 +86,7 @@ export class MiDiaController {
           movements: exp.movimientosFinancieros.map((movement) => ({ ...movement, monto: Number(movement.monto) })),
         });
         return { expediente_id: exp.id, folio: exp.numero_pravia, cliente: exp.cliente_alias, saldo: position.saldo_cliente };
-      }).filter((item) => item.saldo > 0);
+      }).filter((item) => item.saldo > 0) : [];
 
       const quoteFollowups = quotes.map((quote) => {
         const latest = quote.seguimientos[0];
@@ -139,4 +146,3 @@ export class MiDiaController {
     }
   }
 }
-
