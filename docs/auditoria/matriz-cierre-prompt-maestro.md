@@ -7,14 +7,14 @@ Esta matriz evita declarar terminado el proyecto solo porque compila. “Verific
 | Auditoría código/Prisma/Supabase/Storage/datos | Verificado | `fase-0-auditoria.md`, conteos cloud y matriz de discrepancias |
 | Preservación de IDs, relaciones, archivos y filas | Verificado | Solo migraciones aditivas; 1 usuario, 7 expedientes y 65 documentos conservados en última verificación remota |
 | Health independiente de tablas | Verificado | `SELECT 1`, estado DB/Storage/modo sin secretos |
-| Prospecto → cotización | Verificado por dominio/API; E2E preparado | Controladores reales, transición y `e2e:critical` |
-| Aceptación + anticipo validado → expediente | Verificado por unidad/dominio; E2E preparado | Conversión transaccional, auditoría e idempotencia |
-| Guardado dirty-state de expediente | Verificado por implementación; E2E preparado | Cabecera/rubros/participación atómicos, baseline tras éxito y navegación protegida |
-| Compareciente maestro reutilizable | Verificado por implementación; E2E preparado | Entidad independiente, vínculo contextual y prevención de duplicados |
+| Prospecto → cotización | Verificado | Controladores reales y recorrido E2E aislado aprobado |
+| Aceptación + anticipo validado → expediente | Verificado | Conversión transaccional, auditoría, idempotencia y E2E aislado aprobado |
+| Guardado dirty-state de expediente | Verificado | Cabecera/rubros/participación atómicos y persistencia tras recarga comprobada |
+| Compareciente maestro reutilizable | Verificado | Alta, reutilización en dos expedientes y vínculo contextual aprobados en E2E |
 | Validación humana antes de firma | Preparado; migración remota pendiente | Migración aditiva `add_compareciente_link_validation`, auditoría, evento y acción UI |
 | Documentos privados y firmados | Verificado | Storage privado, streaming/firmas cortas, trazabilidad y vínculos |
 | Proyecto de escritura/versiones/IA | Verificado | Versiones, vigente/aprobada protegida, análisis y leyenda de revisión profesional |
-| Firma → postfirma → entrega | Verificado por dominio; E2E preparado | Máquina de estados, requisitos de firma y evidencia obligatoria de entrega |
+| Firma → postfirma → entrega | Verificado | Máquina de estados y fechas finales aprobadas en recorrido E2E aislado |
 | Notarías | Verificado | Ficha, contactos, tiempos, ámbitos y relaciones |
 | Finanzas y comprobantes | Verificado | Ledger inmutable, reversos, adjuntos PDF/XML y separación recibido/honorario |
 | Agenda, Mi Día y reportes | Verificado | CRUD/cancelación/movimiento, vistas día-semana-mes-lista, KPIs y filtros |
@@ -28,12 +28,13 @@ Esta matriz evita declarar terminado el proyecto solo porque compila. “Verific
 | Cloud/local/hybrid | Verificado a nivel arquitectura | Selectores centrales, proveedores Storage y herramientas backup/restore/verify |
 | Unit tests | Verificado | 65 pruebas en 13 archivos |
 | Integración DB | Preparado; ejecución final pendiente | Suite read-only creada; última ejecución bloqueada por conectividad del entorno |
-| E2E UI autenticado | Preparado; ejecución final pendiente | Smoke Playwright creado; requiere cuenta de prueba válida |
-| E2E 11 flujos críticos | Preparado; ejecución final pendiente | Driver completo con guardas de base aislada; no se permite sobre datos actuales |
+| E2E UI autenticado | Verificado local | Smoke Playwright aprobado en siete módulos privados con cuenta sintética aislada |
+| E2E 11 flujos críticos | Verificado local | Recorrido completo aprobado en PostgreSQL 17 + Storage local aislados; IA pagada permanece opcional |
 | Performance frontend | Verificado | Presupuestos gzip verdes y lazy chunks medidos |
 | Performance PostgreSQL | Parcial | Primer lote aplicado; segundo lote operativo preparado pero pendiente de aplicación/verificación remota |
 | Secretos | Verificado con acción operativa | Cero hallazgos actuales; valor histórico de desarrollo identificado por huella y rotación obligatoria |
-| Contenedores/despliegue/reversa | Preparado | Dockerfiles, Nginx, Compose y runbook |
+| Base local nueva | Verificado | Bootstrap transaccional probado, 15 migraciones baselined, cero pendientes y rechazo sobre destino no vacío |
+| Contenedores/despliegue/reversa | Preparado y construido localmente | Imágenes backend/frontend, Nginx, Compose y runbook |
 | README y documentación técnica | Verificado | Guías por fase, arquitectura, seguridad, PWA, calidad y producción |
 
 ## Bloqueadores reales para declarar producción
@@ -41,7 +42,6 @@ Esta matriz evita declarar terminado el proyecto solo porque compila. “Verific
 1. Aplicar remotamente las migraciones `20260811051000` y `20260811052000` y verificar asesores.
 2. Configurar secretos finales y activar deliberadamente una cuenta Dirección; la cuenta preservada no tiene hash bcrypt válido.
 3. Ejecutar integración remota de solo lectura con acceso autorizado.
-4. Ejecutar smoke autenticado.
-5. Ejecutar el recorrido crítico en una base local/efímera, nunca en NOTARYPROY.
+4. Aprobar, si se desea como gate contractual, una única llamada real de IA con documento inequívocamente sintético; el resto del flujo IA ya está validado offline y esta llamada no es necesaria para operar sin IA.
 
-Hasta cerrar esos cinco puntos, el código está preparado para el corte pero la instalación no debe etiquetarse como producción aprobada.
+Los smoke autenticados y el recorrido crítico ya fueron cerrados localmente, siempre fuera de NOTARYPROY. Hasta resolver los bloqueadores remotos, el código está preparado para el corte pero la instalación no debe etiquetarse como producción aprobada.

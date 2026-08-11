@@ -10,7 +10,7 @@ La fase incorpora controles ejecutables, no únicamente una lista de recomendaci
 - captura final de errores no controlados;
 - suite unitaria separada de la integración con base;
 - contrato de integración de solo lectura para esquema, datos preservados, Storage, RLS e índices críticos;
-- smoke E2E de interfaz y autenticación;
+- smoke E2E público y autenticado de interfaz;
 - recorrido E2E mutante de los once flujos críticos, bloqueado por defecto y permitido solo en base aislada;
 - ocho fixtures IA sintéticos para INE, pasaporte, CURP, CSF, comprobante, Word/múltiples, conflicto y mala calidad;
 - evaluación offline nano/mini con exactitud, errores, tokens, latencia y costo estimado claramente etiquetados como sintéticos;
@@ -69,11 +69,15 @@ La IA pagada está apagada por defecto para proteger el presupuesto. Solo se eje
 - mayor chunk: reportes, 108.68 KiB gzip, debajo del presupuesto de 140 KiB;
 - CSS: 18.57 KiB gzip, debajo del presupuesto de 30 KiB;
 - PWA verificada;
-- smoke público aprobado: rutas privadas redirigen a login y recuperación es accesible; tramo autenticado queda pendiente de credenciales válidas;
+- smoke público aprobado: rutas privadas redirigen a login y recuperación es accesible;
+- smoke autenticado aprobado en entorno local aislado para Mi Día, prospectos, cotizaciones, expedientes, comparecientes, agenda y reportes;
+- recorrido crítico completo aprobado en PostgreSQL 17 y Storage local aislados: login, ciclo comercial, anticipo, conversión idempotente, compareciente reutilizado y validado, documento privado, guardado/recarga, finanzas, firma, postfirma y entrega;
 - imágenes de backend (Node 22 + OpenSSL) y frontend/Nginx construidas correctamente con Docker;
 - escaneo actual sin secretos no reconocidos; existe una huella histórica reconocida de un antiguo valor de desarrollo y se exige no reutilizarlo/rotarlo.
 
-Las cifras IA son mediciones del contrato con salidas sintéticas, no afirmaciones sobre precisión real del proveedor. La integración remota y el E2E autenticado/mutante requieren acceso a red, una contraseña de prueba válida y una base aislada; no se ejecutan contra los 7 expedientes y 65 documentos existentes.
+Las cifras IA son mediciones del contrato con salidas sintéticas, no afirmaciones sobre precisión real del proveedor. La llamada pagada con PDF sintético no se ejecutó: el entorno solicitó una autorización explícita adicional antes de enviar el archivo a OpenAI, por lo que no hubo envío ni costo. La integración remota de solo lectura sigue pendiente por conectividad. Ninguna prueba mutante se ejecutó contra los 7 expedientes y 65 documentos existentes.
+
+La historia incremental heredada no puede arrancar por sí sola una base completamente vacía porque su primera migración presupone tipos previos. Se añadió `npm run db:init-empty`, que genera la línea base desde el esquema vigente, la aplica en una transacción y registra las 15 migraciones existentes. Se verificó que funciona sobre PostgreSQL 17 vacío y que rechaza una segunda ejecución sobre un destino con tablas.
 
 ## Rendimiento PostgreSQL
 
@@ -89,8 +93,7 @@ La salida queda bloqueada hasta cumplir todos:
 - configurar una clave JWT nueva de al menos 32 caracteres;
 - activar una cuenta Dirección con hash bcrypt válido;
 - ejecutar integración de solo lectura con resultado verde;
-- ejecutar smoke autenticado;
-- ejecutar E2E crítico en una base aislada y conservar el reporte;
+- conservar el reporte del smoke autenticado y del E2E crítico ya aprobados en base aislada;
 - ejecutar backup y verificarlo antes de migrar;
 - servir por HTTPS y confirmar cookies `Secure`;
 - confirmar webhook de recuperación;

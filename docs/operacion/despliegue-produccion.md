@@ -6,6 +6,8 @@ Producción usa API same-origin detrás de Nginx, PostgreSQL/Supabase cloud y St
 
 Las migraciones son un paso explícito anterior al backend. Nunca usar `db push`, `migrate reset`, `--clean` ni restaurar sobre la base actual.
 
+Para una instalación totalmente nueva —no para actualizar la base vigente— se dispone de `db:init-empty`. Requiere una URL explícita con `schema=pravia_os`, la confirmación `INITIALIZE_EMPTY_PRAVIA_TARGET` y comprueba que `public` y `pravia_os` no tengan tablas. Si existe cualquier tabla de aplicación, se detiene sin cambios.
+
 ## Preparación
 
 1. Crear `backend/.env.production` fuera de Git a partir de `.env.example`.
@@ -40,6 +42,14 @@ docker compose -f docker-compose.cloud.example.yml up -d backend frontend
 ```
 
 La migración debe terminar antes de iniciar la imagen nueva. Las migraciones de esta fase son aditivas (`CREATE INDEX IF NOT EXISTS` y columnas de validación con valor predeterminado); no eliminan filas ni cambian IDs.
+
+En un PostgreSQL 17 nuevo y vacío, inicializar una sola vez desde `backend`:
+
+```text
+INIT_DATABASE_URL=... INIT_CONFIRMATION=INITIALIZE_EMPTY_PRAVIA_TARGET npm run db:init-empty
+```
+
+No usar este comando en la base cloud vigente. La comprobación local de Fase 13 confirmó creación completa, registro de 15 migraciones, cero pendientes y rechazo seguro de una segunda ejecución.
 
 ## Activación de la primera cuenta
 

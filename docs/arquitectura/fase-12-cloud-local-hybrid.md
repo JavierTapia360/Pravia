@@ -46,8 +46,11 @@ Solo el primario atiende solicitudes. `replication_enabled` permanece `false` en
 | `npm run storage:verify` | Comprueba proveedor y salud del Storage seleccionado | Solo lectura |
 | `npm run db:backup` | Crea un dump custom de `pravia_os` | Exige `BACKUP_FILE` absoluto; no sobrescribe salvo confirmación |
 | `npm run db:restore` | Restaura un dump en un destino explícito | Exige `RESTORE_DATABASE_URL`, frase de confirmación y destino con cero tablas |
+| `npm run db:init-empty` | Crea la línea base vigente en una base nueva | Exige `INIT_DATABASE_URL` con `schema=pravia_os`, frase exacta y cero tablas en `public`/`pravia_os` |
 
 Las utilidades pasan la contraseña a `pg_dump`, `psql` y `pg_restore` mediante entorno, no como argumento ni salida. Restore nunca usa `--clean`, no borra objetos y rechaza destinos no vacíos.
+
+`db:init-empty` existe porque el historial incremental heredado comienza sobre una base que ya contenía tipos y no sirve como bootstrap autónomo. El inicializador genera el esquema actual con Prisma, lo aplica dentro de una transacción, registra cada migración como línea base y confirma que no queden pendientes. No usa `db push`, no elimina objetos y se niega a ejecutarse si encuentra una tabla de aplicación.
 
 ## Procedimiento futuro de migración
 
@@ -73,5 +76,5 @@ La verificación de solo lectura sobre cloud confirmó:
 - historial Prisma heredado localizado en `public`, sin moverlo;
 - Storage cloud disponible;
 - `replication_enabled=false`;
-- 58 pruebas aprobadas en 11 archivos para modos, selección de primario, traversal, firmas y el resto del dominio;
+- 65 pruebas aprobadas en 13 archivos para modos, selección de primario, traversal, firmas y el resto del dominio;
 - backend compilado correctamente.
