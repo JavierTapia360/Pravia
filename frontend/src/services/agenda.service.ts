@@ -47,9 +47,8 @@ export const agendaService = {
   catalogs: () => api.get('/agenda/catalogos'),
   create: (payload: Record<string, unknown>) => api.post('/agenda', payload),
   update: (id: string, payload: Record<string, unknown>) => api.patch(`/agenda/${id}`, payload),
-  cancel: (id: string, payload: { actor_user_id: string; motivo_cancelacion: string }) => api.post(`/agenda/${id}/cancelar`, payload),
+  cancel: (id: string, payload: { motivo_cancelacion: string }) => api.post(`/agenda/${id}/cancelar`, payload),
   listTasks: (params: Record<string, string | undefined> = {}) => api.get(`/agenda/tareas?${query(params)}`),
   createTask: (payload: Record<string, unknown>) => api.post('/agenda/tareas', payload),
   updateTask: (id: string, payload: Record<string, unknown>) => api.patch(`/agenda/tareas/${id}`, payload),
 };
-

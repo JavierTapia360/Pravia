@@ -19,7 +19,7 @@ export default function Riesgos() {
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
-  const [newForm, setNewForm] = useState({ expediente_id: '', rule_set_id: '', fecha_operacion: new Date().toISOString().slice(0, 10), actor_user_id: '' });
+  const [newForm, setNewForm] = useState({ expediente_id: '', rule_set_id: '', fecha_operacion: new Date().toISOString().slice(0, 10) });
   const [evidenceId, setEvidenceId] = useState('');
 
   const load = async () => {
@@ -28,7 +28,6 @@ export default function Riesgos() {
       const [catalogData, reviewData] = await Promise.all([complianceService.catalogs(), complianceService.list(tab)]);
       setCatalogs(catalogData);
       setReviews(reviewData);
-      setNewForm((current) => ({ ...current, actor_user_id: current.actor_user_id || catalogData.usuarios[0]?.id || '' }));
       if (selected) setSelected(reviewData.find((item) => item.id === selected.id) || null);
     } catch (error: any) { toast.addToast(error.message || 'No fue posible cargar cumplimiento.', 'error'); }
     finally { setLoading(false); }
@@ -55,19 +54,19 @@ export default function Riesgos() {
   };
   const evaluate = async () => {
     if (!selected) return; setWorking(true);
-    try { const review = await complianceService.evaluate(selected.id, { cuestionario: answers, actor_user_id: newForm.actor_user_id }); setSelected(review); setReviews((items) => items.map((item) => item.id === review.id ? review : item)); toast.addToast('Evaluación explicable actualizada.', 'success'); }
+    try { const review = await complianceService.evaluate(selected.id, { cuestionario: answers }); setSelected(review); setReviews((items) => items.map((item) => item.id === review.id ? review : item)); toast.addToast('Evaluación explicable actualizada.', 'success'); }
     catch (error: any) { toast.addToast(error.message || 'No fue posible evaluar.', 'error'); }
     finally { setWorking(false); }
   };
   const humanReview = async (decision: 'CONFIRMAR' | 'REQUIERE_AJUSTES') => {
     if (!selected) return; setWorking(true);
-    try { const review = await complianceService.review(selected.id, { decision, actor_user_id: newForm.actor_user_id, observaciones: decision === 'CONFIRMAR' ? 'Resultado revisado y confirmado por el responsable.' : 'Requiere completar o corregir información.' }); setSelected(review); setReviews((items) => items.map((item) => item.id === review.id ? review : item)); toast.addToast(decision === 'CONFIRMAR' ? 'Resultado confirmado.' : 'Revisión devuelta para ajustes.', 'success'); }
+    try { const review = await complianceService.review(selected.id, { decision, observaciones: decision === 'CONFIRMAR' ? 'Resultado revisado y confirmado por el responsable.' : 'Requiere completar o corregir información.' }); setSelected(review); setReviews((items) => items.map((item) => item.id === review.id ? review : item)); toast.addToast(decision === 'CONFIRMAR' ? 'Resultado confirmado.' : 'Revisión devuelta para ajustes.', 'success'); }
     catch (error: any) { toast.addToast(error.message || 'No fue posible registrar la decisión.', 'error'); }
     finally { setWorking(false); }
   };
   const addEvidence = async () => {
     if (!selected || !evidenceId) return; setWorking(true);
-    try { await complianceService.addEvidence(selected.id, { documento_id: evidenceId, tipo_evidencia: tab === 'UIF' ? 'DEBIDA_DILIGENCIA' : 'SOPORTE_FISCAL', actor_user_id: newForm.actor_user_id }); await load(); toast.addToast('Evidencia vinculada sin duplicar el documento.', 'success'); }
+    try { await complianceService.addEvidence(selected.id, { documento_id: evidenceId, tipo_evidencia: tab === 'UIF' ? 'DEBIDA_DILIGENCIA' : 'SOPORTE_FISCAL' }); await load(); toast.addToast('Evidencia vinculada sin duplicar el documento.', 'success'); }
     catch (error: any) { toast.addToast(error.message || 'No fue posible vincular evidencia.', 'error'); }
     finally { setWorking(false); }
   };

@@ -20,12 +20,13 @@ import { useAuthStore } from '../stores/authStore';
 import { agendaService, AgendaTask } from '../services/agenda.service';
 import { miDiaService } from '../services/miDia.service';
 import { useToastStore } from '../stores/toastStore';
+import { canAssignOtherResponsible, defaultResponsibleId, resolveResponsibleSelection } from '../utils/ownership';
 
 const money = (value: number) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(value || 0);
 
 export default function MiDia() {
   const navigate = useNavigate();
-  const user = useAuthStore((state) => state.user);
+  const currentUser = useAuthStore((state) => state.user);
   const { addToast } = useToastStore();
   const [dashboard, setDashboard] = useState<any>(null);
   const [catalogs, setCatalogs] = useState<any>({ usuarios: [], expedientes: [] });
@@ -35,9 +36,11 @@ export default function MiDia() {
   const [taskTitle, setTaskTitle] = useState('');
   const [taskPriority, setTaskPriority] = useState('MEDIA');
   const [taskDeadline, setTaskDeadline] = useState('');
+  const [taskResponsibleId, setTaskResponsibleId] = useState('');
   const [creating, setCreating] = useState(false);
 
-  const actorId = catalogs.usuarios[0]?.id || '';
+  const actorId = defaultResponsibleId(currentUser?.id);
+  const canManageTeam = canAssignOtherResponsible(currentUser?.rol);
   const load = async () => {
     setLoading(true);
     setError('');
@@ -48,6 +51,7 @@ export default function MiDia() {
   useEffect(() => {
     agendaService.catalogs().then((response) => setCatalogs(response.catalogos)).catch((err) => setError(err.message));
   }, []);
+  useEffect(() => { setTaskResponsibleId(actorId); }, [actorId]);
   useEffect(() => { load(); }, [selectedUser]);
 
   const createTask = async (event: FormEvent) => {
@@ -56,14 +60,13 @@ export default function MiDia() {
     setCreating(true);
     try {
       await agendaService.createTask({
-        actor_user_id: actorId,
-        responsable_id: selectedUser === 'TODOS' ? actorId : selectedUser,
+        responsable_id: resolveResponsibleSelection({ authenticatedUserId: actorId, role: currentUser?.rol, requestedResponsibleId: taskResponsibleId }),
         titulo: taskTitle.trim(),
         prioridad: taskPriority,
         fecha_limite: taskDeadline ? new Date(`${taskDeadline}T18:00:00`).toISOString() : null,
         idempotency_key: crypto.randomUUID(),
       });
-      setTaskTitle(''); setTaskDeadline('');
+      setTaskTitle(''); setTaskDeadline(''); setTaskResponsibleId(actorId);
       addToast('Tarea agregada a Mi Día', 'success');
       await load();
     } catch (err: any) { addToast(err.detail || err.message, 'error'); }
@@ -72,7 +75,7 @@ export default function MiDia() {
 
   const completeTask = async (task: AgendaTask) => {
     try {
-      await agendaService.updateTask(task.id, { actor_user_id: actorId, estatus: 'COMPLETADA' });
+      await agendaService.updateTask(task.id, { estatus: 'COMPLETADA' });
       addToast('Tarea completada', 'success');
       await load();
     } catch (err: any) { addToast(err.message, 'error'); }
@@ -94,8 +97,8 @@ export default function MiDia() {
   return (
     <div className="max-w-[1450px] mx-auto p-4 md:p-7 space-y-6">
       <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 border-b border-slate-200 pb-5">
-        <div><span className="text-xs font-bold uppercase tracking-wider text-amber-700">Centro operativo</span><h1 className="text-3xl font-black text-slate-950">Buenos días, {user?.nombre || 'Usuario'}</h1><p className="text-sm text-slate-500 capitalize mt-1">{dateLabel} · Esto es lo que requiere atención.</p></div>
-        <div className="flex items-center gap-2"><select value={selectedUser} onChange={(e) => setSelectedUser(e.target.value)} className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm"><option value="TODOS">Vista del despacho</option>{catalogs.usuarios.map((item: any) => <option key={item.id} value={item.id}>{item.nombre} {item.apellido}</option>)}</select><button onClick={load} disabled={loading} className="p-2.5 rounded-xl border border-slate-200 bg-white text-slate-600"><RefreshCw size={18} className={loading ? 'animate-spin' : ''} /></button></div>
+        <div><span className="text-xs font-bold uppercase tracking-wider text-amber-700">Centro operativo</span><h1 className="text-3xl font-black text-slate-950">Buenos días, {currentUser?.nombre || 'Usuario'}</h1><p className="text-sm text-slate-500 capitalize mt-1">{dateLabel} · Esto es lo que requiere atención.</p></div>
+        <div className="flex items-center gap-2">{canManageTeam && <select value={selectedUser} onChange={(e) => setSelectedUser(e.target.value)} className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm"><option value="TODOS">Vista del despacho</option>{catalogs.usuarios.map((item: any) => <option key={item.id} value={item.id}>{item.nombre} {item.apellido}</option>)}</select>}<button onClick={load} disabled={loading} className="p-2.5 rounded-xl border border-slate-200 bg-white text-slate-600"><RefreshCw size={18} className={loading ? 'animate-spin' : ''} /></button></div>
       </header>
 
       {error && <div className="p-4 rounded-xl border border-rose-200 bg-rose-50 text-sm text-rose-800">{error}</div>}
@@ -110,7 +113,7 @@ export default function MiDia() {
         <div className="space-y-5">
           <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
             <h2 className="font-black text-slate-900 mb-3">Nueva tarea rápida</h2>
-            <form onSubmit={createTask} className="space-y-3"><input required minLength={3} value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="¿Qué hay que hacer?" className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm" /><div className="grid grid-cols-2 gap-2"><select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="rounded-xl border border-slate-300 px-3 py-2.5 text-sm"><option value="BAJA">Baja</option><option value="MEDIA">Media</option><option value="ALTA">Alta</option><option value="URGENTE">Urgente</option></select><input type="date" value={taskDeadline} onChange={(e) => setTaskDeadline(e.target.value)} className="rounded-xl border border-slate-300 px-3 py-2.5 text-sm" /></div><button disabled={creating} className="w-full py-2.5 rounded-xl bg-slate-950 text-white text-sm font-bold inline-flex items-center justify-center gap-2"><Plus size={16} /> {creating ? 'Agregando…' : 'Agregar tarea'}</button></form>
+            <form onSubmit={createTask} className="space-y-3"><input required minLength={3} value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="¿Qué hay que hacer?" className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm" />{canManageTeam ? <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">Responsable de esta tarea</span><select required value={taskResponsibleId} onChange={(e) => setTaskResponsibleId(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"><option value="">Seleccionar responsable</option>{catalogs.usuarios.map((item: any) => <option key={item.id} value={item.id}>{item.nombre} {item.apellido}</option>)}</select><span className="mt-1 block text-[11px] text-slate-500">La vista seleccionada arriba no cambia esta asignación.</span></label> : <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">Responsable: {currentUser?.nombre || 'Usuario autenticado'}</p>}<div className="grid grid-cols-2 gap-2"><select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="rounded-xl border border-slate-300 px-3 py-2.5 text-sm"><option value="BAJA">Baja</option><option value="MEDIA">Media</option><option value="ALTA">Alta</option><option value="URGENTE">Urgente</option></select><input type="date" value={taskDeadline} onChange={(e) => setTaskDeadline(e.target.value)} className="rounded-xl border border-slate-300 px-3 py-2.5 text-sm" /></div><button disabled={creating} className="w-full py-2.5 rounded-xl bg-slate-950 text-white text-sm font-bold inline-flex items-center justify-center gap-2"><Plus size={16} /> {creating ? 'Agregando…' : 'Agregar tarea'}</button></form>
           </section>
 
           <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden"><div className="p-4 border-b border-slate-200 flex items-center justify-between"><h2 className="font-black text-slate-900">Tareas abiertas</h2><Link to="/agenda" className="text-xs font-bold text-blue-700">Abrir agenda</Link></div><div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">{tasks.slice(0, 15).map((task) => <div key={task.id} className="p-3 flex gap-3"><button onClick={() => completeTask(task)} className="text-slate-400 hover:text-emerald-600"><CheckCircle2 size={19} /></button><div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">{task.titulo}</p><p className={`text-[11px] ${task.fecha_limite && new Date(task.fecha_limite) < new Date() ? 'text-rose-600 font-bold' : 'text-slate-500'}`}>{task.prioridad}{task.fecha_limite ? ` · ${new Date(task.fecha_limite).toLocaleDateString('es-MX')}` : ''}</p>{task.expediente && <button onClick={() => navigate(`/expedientes/${task.expediente_id}`)} className="text-[11px] text-blue-700 font-bold">{task.expediente.numero_pravia}</button>}</div></div>)}{tasks.length === 0 && <p className="p-8 text-center text-sm text-slate-500">No hay tareas abiertas.</p>}</div></section>

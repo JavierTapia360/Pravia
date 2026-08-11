@@ -15,7 +15,9 @@ import {
   X,
 } from 'lucide-react';
 import { AgendaEvent, AgendaTask, AgendaView, agendaService } from '../services/agenda.service';
+import { useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
+import { canAssignOtherResponsible, defaultResponsibleId, resolveResponsibleSelection } from '../utils/ownership';
 
 const EVENT_LABELS: Record<string, string> = {
   PERSONAL: 'Personal', DESPACHO: 'Despacho', FIRMA: 'Firma', AUDIENCIA: 'Audiencia',
@@ -54,6 +56,7 @@ function rangeFor(view: AgendaView, anchor: Date) {
 
 export default function Agenda() {
   const navigate = useNavigate();
+  const currentUser = useAuthStore((state) => state.user);
   const { addToast } = useToastStore();
   const [view, setView] = useState<AgendaView>('mes');
   const [anchor, setAnchor] = useState(new Date());
@@ -71,7 +74,11 @@ export default function Agenda() {
   const [saving, setSaving] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
 
-  const actorId = catalogs.usuarios[0]?.id || '';
+  const actorId = defaultResponsibleId(currentUser?.id);
+  const canAssignOthers = canAssignOtherResponsible(currentUser?.rol);
+  const assignableUsers = canAssignOthers
+    ? catalogs.usuarios
+    : catalogs.usuarios.filter((item: any) => item.id === actorId);
   const currentRange = useMemo(() => rangeFor(view, anchor), [view, anchor]);
 
   const load = async () => {
@@ -112,7 +119,7 @@ export default function Agenda() {
 
   const openCreate = (date = anchor) => {
     const next = emptyForm(new Date(date.getFullYear(), date.getMonth(), date.getDate(), 9));
-    next.responsable_id = userFilter !== 'TODOS' ? userFilter : actorId;
+    next.responsable_id = actorId;
     setForm(next);
     setSelected(null);
     setCancelReason('');
@@ -137,7 +144,7 @@ export default function Agenda() {
     try {
       const payload = {
         ...form,
-        actor_user_id: actorId,
+        responsable_id: resolveResponsibleSelection({ authenticatedUserId: actorId, role: currentUser?.rol, requestedResponsibleId: form.responsable_id }),
         fecha_inicio: new Date(form.fecha_inicio).toISOString(),
         fecha_fin: form.fecha_fin ? new Date(form.fecha_fin).toISOString() : null,
         expediente_id: form.expediente_id || null,
@@ -158,7 +165,7 @@ export default function Agenda() {
     if (!selected || cancelReason.trim().length < 5) return addToast('Escribe un motivo de al menos 5 caracteres', 'error');
     setSaving(true);
     try {
-      await agendaService.cancel(selected.id, { actor_user_id: actorId, motivo_cancelacion: cancelReason.trim() });
+      await agendaService.cancel(selected.id, { motivo_cancelacion: cancelReason.trim() });
       addToast('Evento cancelado con trazabilidad', 'success');
       setShowEditor(false);
       await load();
@@ -168,7 +175,7 @@ export default function Agenda() {
 
   const completeTask = async (task: AgendaTask) => {
     try {
-      await agendaService.updateTask(task.id, { estatus: 'COMPLETADA', actor_user_id: actorId });
+      await agendaService.updateTask(task.id, { estatus: 'COMPLETADA' });
       addToast('Tarea completada', 'success');
       await load();
     } catch (err: any) { addToast(err.message, 'error'); }
@@ -219,7 +226,7 @@ export default function Agenda() {
       <section className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-3">
         <label className="relative md:col-span-2"><Search size={16} className="absolute left-3 top-3 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar evento, folio o responsable" className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm" /></label>
         <label className="relative"><Filter size={15} className="absolute left-3 top-3 text-slate-400" /><select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm"><option value="TODOS">Todos los tipos</option>{catalogs.tipos.map((item: any) => <option key={item.tipo} value={item.tipo}>{EVENT_LABELS[item.tipo]}</option>)}</select></label>
-        <select value={userFilter} onChange={(e) => setUserFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm"><option value="TODOS">Todo el despacho</option>{catalogs.usuarios.map((user: any) => <option key={user.id} value={user.id}>{user.nombre} {user.apellido}</option>)}</select>
+        <select value={userFilter} onChange={(e) => setUserFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm"><option value="TODOS">{canAssignOthers ? 'Todo el despacho' : 'Mi agenda'}</option>{assignableUsers.map((user: any) => <option key={user.id} value={user.id}>{user.nombre} {user.apellido}</option>)}</select>
       </section>
 
       {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div>}
@@ -254,7 +261,7 @@ export default function Agenda() {
             <div className="sticky top-0 bg-white border-b border-slate-200 p-5 flex items-center justify-between z-10"><div><p className="text-xs uppercase font-bold text-amber-700">{selected ? 'Editar y mover' : 'Nuevo'}</p><h2 className="text-xl font-black text-slate-950">Evento de agenda</h2></div><button onClick={() => setShowEditor(false)} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"><X size={20} /></button></div>
             <form onSubmit={saveEvent} className="p-5 space-y-4">
               <label className="block"><span className="block text-xs font-bold text-slate-700 mb-1">Título</span><input required minLength={3} maxLength={180} value={form.titulo} onChange={(e) => setForm({ ...form, titulo: e.target.value })} className="w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-              <div className="grid sm:grid-cols-2 gap-3"><label><span className="block text-xs font-bold text-slate-700 mb-1">Tipo</span><select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })} className="w-full rounded-xl border border-slate-300 px-3 py-2.5">{Object.entries(EVENT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span className="block text-xs font-bold text-slate-700 mb-1">Responsable</span><select required value={form.responsable_id} onChange={(e) => setForm({ ...form, responsable_id: e.target.value })} className="w-full rounded-xl border border-slate-300 px-3 py-2.5"><option value="">Seleccionar</option>{catalogs.usuarios.map((user: any) => <option key={user.id} value={user.id}>{user.nombre} {user.apellido}</option>)}</select></label></div>
+              <div className="grid sm:grid-cols-2 gap-3"><label><span className="block text-xs font-bold text-slate-700 mb-1">Tipo</span><select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })} className="w-full rounded-xl border border-slate-300 px-3 py-2.5">{Object.entries(EVENT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span className="block text-xs font-bold text-slate-700 mb-1">Responsable</span><select required disabled={!canAssignOthers} value={form.responsable_id} onChange={(e) => setForm({ ...form, responsable_id: resolveResponsibleSelection({ authenticatedUserId: actorId, role: currentUser?.rol, requestedResponsibleId: e.target.value }) })} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 disabled:bg-slate-100 disabled:text-slate-600"><option value="">Seleccionar</option>{assignableUsers.map((user: any) => <option key={user.id} value={user.id}>{user.nombre} {user.apellido}</option>)}</select>{!canAssignOthers && <span className="mt-1 block text-[11px] text-slate-500">Solo puedes asignarte eventos a ti.</span>}</label></div>
               <div className="grid sm:grid-cols-2 gap-3"><label><span className="block text-xs font-bold text-slate-700 mb-1">Inicio</span><input type="datetime-local" required value={form.fecha_inicio} onChange={(e) => setForm({ ...form, fecha_inicio: e.target.value })} className="w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label><label><span className="block text-xs font-bold text-slate-700 mb-1">Fin (opcional)</span><input type="datetime-local" value={form.fecha_fin} onChange={(e) => setForm({ ...form, fecha_fin: e.target.value })} className="w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label></div>
               <label className="flex items-center gap-2 text-sm font-semibold text-slate-700"><input type="checkbox" checked={form.todo_el_dia} onChange={(e) => setForm({ ...form, todo_el_dia: e.target.checked })} /> Todo el día</label>
               <div className="grid sm:grid-cols-2 gap-3"><label><span className="block text-xs font-bold text-slate-700 mb-1">Expediente (opcional)</span><select value={form.expediente_id} onChange={(e) => setForm({ ...form, expediente_id: e.target.value })} className="w-full rounded-xl border border-slate-300 px-3 py-2.5"><option value="">Sin vínculo</option>{catalogs.expedientes.map((item: any) => <option key={item.id} value={item.id}>{item.numero_pravia} · {item.cliente_alias}</option>)}</select></label><label><span className="block text-xs font-bold text-slate-700 mb-1">Compareciente (opcional)</span><select value={form.compareciente_id} onChange={(e) => setForm({ ...form, compareciente_id: e.target.value })} className="w-full rounded-xl border border-slate-300 px-3 py-2.5"><option value="">Sin vínculo</option>{catalogs.comparecientes.map((item: any) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label></div>

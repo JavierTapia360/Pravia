@@ -1,5 +1,17 @@
 import { TipoEvento } from '@prisma/client';
 
+type AgendaActor = { id: string; rol: string } | null | undefined;
+
+export function canManageAgendaTeam(actor: AgendaActor) {
+  return Boolean(actor && ['DIRECCION', 'ADMINISTRACION'].includes(actor.rol));
+}
+
+export function canAssignAgendaResponsibility(actor: AgendaActor, requestedResponsibleId: unknown) {
+  if (!actor) return false;
+  const responsibleId = String(requestedResponsibleId || actor.id);
+  return canManageAgendaTeam(actor) || responsibleId === actor.id;
+}
+
 export const AGENDA_EVENT_TYPES: TipoEvento[] = [
   'PERSONAL',
   'DESPACHO',
@@ -58,4 +70,3 @@ export function normalizeReminders(value: unknown): number[] {
   }
   return unique.sort((a, b) => a - b);
 }
-
