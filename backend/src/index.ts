@@ -2,8 +2,8 @@ import 'dotenv/config';
 import express, { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import { randomUUID } from 'crypto';
-import { configuredDatabaseSchema, prisma } from './config/prisma';
-import { BUCKET_NAME, getSupabaseClient } from './services/supabase.service';
+import { configuredDatabaseMode, configuredDatabasePrimary, configuredDatabaseSchema, prisma } from './config/prisma';
+import { checkStorageHealth, getStorageInfo } from './services/supabase.service';
 import { getOpenAIEscalationModelName, getOpenAIModelName } from './services/openaiDocument.service';
 
 import prospectosRoutes from './routes/prospectos.routes';
@@ -21,6 +21,7 @@ import aiRoutes from './routes/ai.routes';
 import complianceRoutes from './routes/compliance.routes';
 import authRoutes from './routes/auth.routes';
 import usersRoutes from './routes/users.routes';
+import storageRoutes from './routes/storage.routes';
 import { authenticate, authorizeByMethod, requirePasswordReady, requirePermission } from './middleware/auth.middleware';
 
 const app = express();
@@ -80,27 +81,25 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 const healthHandler = async (req: Request, res: Response) => {
   const correlationId = (req as Request & { correlationId?: string }).correlationId;
   let storage: 'ok' | 'error' | 'not_configured' = 'not_configured';
+  const storageInfo = getStorageInfo();
 
   try {
     await prisma.$queryRaw`SELECT 1`;
 
-    if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      try {
-        const { error } = await getSupabaseClient().storage.getBucket(BUCKET_NAME);
-        storage = error ? 'error' : 'ok';
-      } catch {
-        storage = 'error';
-      }
-    }
-
+    storage = await checkStorageHealth();
     return res.json({
       api: 'ok',
       database: 'ok',
       storage,
       service: 'PRAVIA OS backend',
       environment: process.env.NODE_ENV || 'development',
-      database_mode: process.env.PRAVIA_DATABASE_MODE || 'cloud',
+      database_mode: configuredDatabaseMode,
+      database_primary: configuredDatabasePrimary,
       database_schema: configuredDatabaseSchema,
+      storage_mode: storageInfo.mode,
+      storage_primary: storageInfo.primary,
+      storage_provider: storageInfo.provider,
+      replication_enabled: storageInfo.replication_enabled,
       timestamp: new Date().toISOString(),
       correlation_id: correlationId,
     });
@@ -111,8 +110,13 @@ const healthHandler = async (req: Request, res: Response) => {
       storage,
       service: 'PRAVIA OS backend',
       environment: process.env.NODE_ENV || 'development',
-      database_mode: process.env.PRAVIA_DATABASE_MODE || 'cloud',
+      database_mode: configuredDatabaseMode,
+      database_primary: configuredDatabasePrimary,
       database_schema: configuredDatabaseSchema,
+      storage_mode: storageInfo.mode,
+      storage_primary: storageInfo.primary,
+      storage_provider: storageInfo.provider,
+      replication_enabled: storageInfo.replication_enabled,
       timestamp: new Date().toISOString(),
       correlation_id: correlationId,
       ...(process.env.NODE_ENV === 'development' ? { detail: dbErr.message } : {}),
@@ -122,6 +126,9 @@ const healthHandler = async (req: Request, res: Response) => {
 
 app.get('/health', healthHandler);
 app.get('/api/health', healthHandler);
+
+// Enlaces firmados de Storage local: la firma corta sustituye al JWT para visor/descarga.
+app.use('/api/storage', storageRoutes);
 
 // Autenticación pública: solo estas operaciones aceptan solicitudes sin JWT.
 app.use('/api/auth', (req: Request, res: Response, next: NextFunction) => {
