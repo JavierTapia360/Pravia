@@ -13,6 +13,9 @@ import expedientesRoutes from './routes/expedientes.routes';
 import comparecientesRoutes from './routes/compareciente.routes';
 import comparecienteAltaSessionRoutes from './routes/comparecienteAltaSession.routes';
 import finanzasRoutes from './routes/finanzas.routes';
+import agendaRoutes from './routes/agenda.routes';
+import reportesRoutes from './routes/reportes.routes';
+import miDiaRoutes from './routes/miDia.routes';
 
 const app = express();
 app.disable('etag');
@@ -190,6 +193,9 @@ app.use('/api/comparecientes/altas', comparecienteAltaSessionRoutes);
 app.use('/api/comparecientes/alta', comparecienteAltaSessionRoutes);
 app.use('/api/comparecientes', comparecientesRoutes);
 app.use('/api/finanzas', finanzasRoutes);
+app.use('/api/agenda', agendaRoutes);
+app.use('/api/reportes', reportesRoutes);
+app.use('/api/mi-dia', miDiaRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {

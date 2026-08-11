@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import MainLayout from './components/layout/MainLayout';
 import { EmptyState, LoadingState } from './components/ui/AsyncState';
-import { BarChart3, BrainCircuit, Calendar, ShieldAlert } from 'lucide-react';
+import { BrainCircuit, Calendar, ShieldAlert } from 'lucide-react';
 
 const MiDia = lazy(() => import('./pages/MiDia'));
 const Prospectos = lazy(() => import('./pages/Prospectos'));
@@ -17,6 +17,8 @@ const Comparecientes = lazy(() => import('./pages/Comparecientes'));
 const ComparecienteNuevo = lazy(() => import('./pages/ComparecienteNuevo'));
 const ComparecienteDetail = lazy(() => import('./pages/ComparecienteDetail'));
 const Finanzas = lazy(() => import('./pages/Finanzas'));
+const Agenda = lazy(() => import('./pages/Agenda'));
+const Reportes = lazy(() => import('./pages/Reportes'));
 const Login = lazy(() => import('./pages/Login'));
 
 // Zustand store for quick auth check (will build robustly later)
@@ -83,8 +85,8 @@ function App() {
             <Route path="comparecientes/nuevo" element={<ComparecienteNuevo />} />
             <Route path="comparecientes/:id" element={<ComparecienteDetail />} />
             <Route path="finanzas" element={<Finanzas />} />
-            <Route path="agenda" element={<ModulePlaceholder title="Agenda operativa" description="Este módulo integrará citas, firmas, vencimientos y recordatorios. La ruta está reservada y se completará en la fase de agenda y Mi Día." icon={Calendar} />} />
-            <Route path="reportes" element={<ModulePlaceholder title="Reportes operativos" description="Los indicadores se conectarán a datos reales una vez estabilizados los flujos principales y financieros." icon={BarChart3} />} />
+            <Route path="agenda" element={<Agenda />} />
+            <Route path="reportes" element={<Reportes />} />
             <Route path="inteligencia" element={<ModulePlaceholder title="Inteligencia operativa" description="La asistencia documental se publicará aquí con trazabilidad, métricas de uso y escalamiento controlado de modelo." icon={BrainCircuit} />} />
             <Route path="riesgos" element={<ModulePlaceholder title="Riesgos y cumplimiento" description="El centro UIF e ISR se habilitará con reglas verificables, alertas explicables y permisos por rol." icon={ShieldAlert} />} />
           </Route>

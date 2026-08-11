@@ -31,7 +31,8 @@ model User {
   prospectos               Prospecto[]
   archivedProspectos       Prospecto[]             @relation("ProspectoArchivedBy")
   notas                    Nota[]
-  eventos                  EventoAgenda[]
+  eventos                  EventoAgenda[]          @relation("EventoResponsable")
+  eventosCancelados        EventoAgenda[]          @relation("EventoCanceladoPor")
   auditLogs                AuditLog[]
   cotizaciones             Cotizacion[]
   comunicaciones           Comunicacion[]
@@ -970,6 +971,7 @@ model Compareciente {
   datosFuente           ComparecienteDatoFuente[]
   aliases               ComparecienteAlias[]
   actividadesEconomicas ComparecienteActividadEconomica[]
+  eventosAgenda         EventoAgenda[]
 
   @@index([nombre_busqueda])
   @@index([tipo_persona])
@@ -1629,23 +1631,38 @@ enum TareaEstatus {
 }
 
 model EventoAgenda {
-  id              String     @id @default(uuid()) @db.Uuid
-  titulo          String
-  descripcion     String?
-  tipo            TipoEvento
-  fecha_inicio    DateTime
-  fecha_fin       DateTime?
-  todo_el_dia     Boolean    @default(false)
-  user_id         String?    @db.Uuid
-  expediente_id   String?    @db.Uuid
-  event_id        String?    @db.Uuid
-  idempotency_key String?    @unique
-  created_at      DateTime   @default(now())
+  id                 String              @id @default(uuid()) @db.Uuid
+  titulo             String
+  descripcion        String?
+  tipo               TipoEvento
+  fecha_inicio       DateTime
+  fecha_fin          DateTime?
+  todo_el_dia        Boolean             @default(false)
+  user_id            String?             @db.Uuid
+  expediente_id      String?             @db.Uuid
+  compareciente_id   String?             @db.Uuid
+  event_id           String?             @db.Uuid
+  idempotency_key    String?             @unique
+  estatus            EventoAgendaEstatus @default(ACTIVO)
+  recordatorios      Json?
+  cancelado_at       DateTime?
+  cancelado_por_id   String?             @db.Uuid
+  motivo_cancelacion String?
+  created_at         DateTime            @default(now())
+  updated_at         DateTime            @updatedAt
 
-  usuario    User?       @relation(fields: [user_id], references: [id])
-  expediente Expediente? @relation(fields: [expediente_id], references: [id], onDelete: SetNull)
+  usuario       User?          @relation("EventoResponsable", fields: [user_id], references: [id])
+  cancelado_por User?          @relation("EventoCanceladoPor", fields: [cancelado_por_id], references: [id])
+  expediente    Expediente?    @relation(fields: [expediente_id], references: [id], onDelete: SetNull)
+  compareciente Compareciente? @relation(fields: [compareciente_id], references: [id], onDelete: SetNull)
 
   @@map("eventos_agenda")
+}
+
+enum EventoAgendaEstatus {
+  ACTIVO
+  COMPLETADO
+  CANCELADO
 }
 
 enum TipoEvento {
@@ -1654,6 +1671,10 @@ enum TipoEvento {
   FIRMA
   AUDIENCIA
   VENCIMIENTO
+  CITA
+  NOTARIA
+  SEGUIMIENTO
+  OTRO
 }
 
 model TareaExterna {
