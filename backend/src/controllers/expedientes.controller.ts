@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { ExpedienteEstatus, TipoMovimiento, NaturalezaMovimiento, DocEstatus, Prisma } from '@prisma/client';
+import { ExpedienteEstatus, TipoMovimiento, NaturalezaMovimiento, DocEstatus, DocCategoria, Prisma } from '@prisma/client';
 import { ExpedienteWorkflowService, TransicionPayload } from '../services/expedienteWorkflow.service';
 import { calculateExpedienteProgress } from '../services/expedienteProgress.service';
 import { downloadFile, uploadFile, deleteFile } from '../services/supabase.service';
@@ -878,7 +878,14 @@ export const addExpedienteDocumento = async (req: Request, res: Response) => {
 
     const originalName = file.originalname;
     const carpetaTarget = carpeta || 'Administrativo';
-    const categoriaTarget = categoria || 'PROYECTO';
+    const categoriaTarget = String(categoria || 'PROYECTO').toUpperCase();
+    if (!Object.values(DocCategoria).includes(categoriaTarget as DocCategoria)) {
+      return res.status(400).json({
+        code: 'INVALID_DOCUMENT_CATEGORY',
+        error: 'La categoría documental no es válida.',
+        allowed_categories: Object.values(DocCategoria),
+      });
+    }
 
     // 1. Supabase es el almacenamiento canónico; no duplicar cada carga en disco local.
     const fileBuffer = file.buffer || (file.path && fs.existsSync(file.path) ? fs.readFileSync(file.path) : null);
@@ -909,7 +916,7 @@ export const addExpedienteDocumento = async (req: Request, res: Response) => {
             nombre_interno: storageKeyFinal,
             storage_key: storageKeyFinal,
             tipo: categoriaTarget,
-            categoria: categoriaTarget,
+            categoria: categoriaTarget as DocCategoria,
             mime_type: file.mimetype,
             size_bytes: file.size,
             subido_por_id: userId,

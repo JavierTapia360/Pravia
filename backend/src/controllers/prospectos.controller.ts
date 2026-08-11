@@ -54,8 +54,6 @@ export const getProspectos = async (req: Request, res: Response) => {
 
 export const createProspecto = async (req: Request, res: Response) => {
   try {
-    console.log('📥 POST /api/prospectos body:', JSON.stringify(req.body, null, 2));
-
     const { user_id, ...rawData } = req.body;
     const userId = user_id || await getDefaultUserId();
 

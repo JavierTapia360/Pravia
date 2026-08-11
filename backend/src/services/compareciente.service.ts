@@ -519,6 +519,9 @@ export class ComparecienteService {
     observaciones?: string;
     creado_por_id: string;
   }) {
+    if (!dto.expediente_id || !dto.compareciente_id || !dto.caracter_id) {
+      throw new Error('expediente_id, compareciente_id y caracter_id son obligatorios para crear el vínculo.');
+    }
     return await this.prisma.$transaction(async (tx) => {
       const existente = await tx.expedienteCompareciente.findFirst({
         where: {
