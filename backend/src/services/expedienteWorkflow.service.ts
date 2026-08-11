@@ -1,5 +1,6 @@
 import { PrismaClient, ExpedienteEstatus, Role, Prisma } from '@prisma/client';
 import { ExpedienteProgressService } from './expedienteProgress.service';
+import { assertExpedienteTransition, ExpedienteWorkflowError } from '../domain/expedienteWorkflow';
 
 export interface TransicionPayload {
   expedienteId: string;
@@ -61,9 +62,11 @@ export class ExpedienteWorkflowService {
         throw new Error('Expediente no encontrado');
       }
 
-      // 3. Bloqueo de estados finales (ENTREGADO / CANCELADO)
-      if (exp.estatus === 'ENTREGADO' || exp.estatus === 'CANCELADO') {
-        throw new Error(`El expediente se encuentra en estado final '${exp.estatus}'. Se requiere procedimiento de reapertura excepcional por DIRECCION.`);
+      // 3. Validar la secuencia determinística de estados.
+      if (payload.nuevoEstatus && payload.nuevoEstatus !== exp.estatus) {
+        assertExpedienteTransition(exp.estatus, payload.nuevoEstatus);
+      } else if (!payload.nuevaEtapaClave) {
+        throw new ExpedienteWorkflowError('La transición no contiene un cambio de estado o etapa.', 'EXPEDIENTE_TRANSITION_EMPTY');
       }
 
       // 4. Validar matriz de permisos por rol autenticado
@@ -87,11 +90,51 @@ export class ExpedienteWorkflowService {
         if (!flujoEtapaSnapshot) {
           throw new Error(`La etapa '${payload.nuevaEtapaClave}' no existe o no está activa en la plantilla del Tipo de Acto`);
         }
+
+        const effectiveStatus = payload.nuevoEstatus || exp.estatus;
+        if (flujoEtapaSnapshot.estado_general_relacionado !== effectiveStatus) {
+          throw new ExpedienteWorkflowError(
+            `La etapa '${flujoEtapaSnapshot.nombre}' no corresponde al estado seleccionado.`,
+            'EXPEDIENTE_STAGE_STATUS_MISMATCH',
+            409,
+          );
+        }
+
+        if (exp.expediente_etapa_actual_id) {
+          const currentStage = await tx.expedienteEtapa.findUnique({ where: { id: exp.expediente_etapa_actual_id } });
+          if (currentStage && flujoEtapaSnapshot.orden <= currentStage.orden_snapshot) {
+            throw new ExpedienteWorkflowError('No se puede regresar o repetir una etapa por el flujo ordinario.', 'EXPEDIENTE_STAGE_BACKWARD', 409);
+          }
+          if (currentStage) {
+            const mandatoryBetween = await tx.flujoEtapa.count({
+              where: {
+                tipo_acto_id: exp.tipo_acto_id,
+                activa: true,
+                orden: { gt: currentStage.orden_snapshot, lt: flujoEtapaSnapshot.orden },
+                obligatoria: true,
+                se_puede_omitir: false,
+              }
+            });
+            if (mandatoryBetween > 0) {
+              throw new ExpedienteWorkflowError(
+                `Hay ${mandatoryBetween} etapa(s) obligatoria(s) antes de '${flujoEtapaSnapshot.nombre}'.`,
+                'EXPEDIENTE_STAGE_SKIP_NOT_ALLOWED',
+                409,
+              );
+            }
+          }
+        }
       }
 
       // 6. Regla especial y checklist de Firma Programada
       if (payload.nuevoEstatus === 'FIRMA_PROGRAMADA') {
         this.validarRequisitosFirma(exp, payload.datosFirma);
+      }
+      if (payload.nuevoEstatus === 'ENTREGADO' && !payload.observaciones?.trim()) {
+        throw new ExpedienteWorkflowError(
+          'Registra en observaciones a quién se entregó y la evidencia disponible.',
+          'EXPEDIENTE_DELIVERY_EVIDENCE_REQUIRED',
+        );
       }
 
       // 7. Cerrar etapa actual e instanciar la nueva etapa operativa
@@ -171,7 +214,22 @@ export class ExpedienteWorkflowService {
           expediente_etapa_actual_id: nuevaEtapaInstanciaId,
           etapa_actual_nombre: nuevaEtapaNombre,
           fecha_estimada_firma: payload.datosFirma?.fechaFirma || exp.fecha_estimada_firma,
-          fecha_real_firma: payload.nuevoEstatus === 'FIRMADO' ? new Date() : exp.fecha_real_firma
+          fecha_real_firma: payload.nuevoEstatus === 'FIRMADO' ? new Date() : exp.fecha_real_firma,
+          fecha_entrega_cliente: payload.nuevoEstatus === 'ENTREGADO' ? new Date() : exp.fecha_entrega_cliente,
+          datos_operacion: payload.datosFirma?.lugar
+            ? {
+                ...((exp.datos_operacion && typeof exp.datos_operacion === 'object' && !Array.isArray(exp.datos_operacion))
+                  ? exp.datos_operacion as Record<string, Prisma.JsonValue>
+                  : {}),
+                firma: {
+                  fecha_programada: payload.datosFirma.fechaFirma.toISOString(),
+                  lugar: payload.datosFirma.lugar.trim(),
+                  saldo_pendiente_autorizado: Boolean(payload.datosFirma.autorizaSaldoPendiente),
+                },
+              }
+            : exp.datos_operacion === null
+              ? Prisma.JsonNull
+              : exp.datos_operacion as Prisma.InputJsonValue
         }
       });
 
@@ -202,6 +260,19 @@ export class ExpedienteWorkflowService {
           descripcion: payload.observaciones || `Transición ejecutada por ${actorUser.nombre} ${actorUser.apellido}`
         }
       });
+
+      if (payload.nuevoEstatus && payload.nuevoEstatus !== exp.estatus) {
+        await tx.expedienteEstatus_Log.create({
+          data: {
+            expediente_id: exp.id,
+            estatus_anterior: exp.estatus,
+            estatus_nuevo: payload.nuevoEstatus,
+            user_id: actorUser.id,
+            fecha_efectiva: new Date(),
+            notas: payload.observaciones?.trim() || null,
+          }
+        });
+      }
 
       // 11. Registrar AuditLog Técnico Inmutable
       await tx.auditLog.create({

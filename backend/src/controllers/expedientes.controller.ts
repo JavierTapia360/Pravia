@@ -2,12 +2,17 @@ import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { ExpedienteEstatus, TipoMovimiento, NaturalezaMovimiento, DocEstatus, Prisma } from '@prisma/client';
-import { ExpedienteWorkflowService } from '../services/expedienteWorkflow.service';
+import { ExpedienteWorkflowService, TransicionPayload } from '../services/expedienteWorkflow.service';
 import { calculateExpedienteProgress } from '../services/expedienteProgress.service';
 import { downloadFile, uploadFile, deleteFile } from '../services/supabase.service';
 import prisma from '../config/prisma';
 import { CotizacionConversionService } from '../services/cotizacionConversion.service';
 import { CotizacionBusinessError } from '../domain/cotizacionWorkflow';
+import {
+  EXPEDIENTE_STATUS_LABELS,
+  ExpedienteWorkflowError,
+  getAllowedExpedienteTransitions,
+} from '../domain/expedienteWorkflow';
 
 const cotizacionConversionService = new CotizacionConversionService(prisma);
 
@@ -157,7 +162,41 @@ export const getExpedienteById = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Expediente no encontrado' });
     }
 
-    res.json(expediente);
+    const currentStageOrder = expediente.etapaActual?.orden_snapshot || 0;
+    const workflowStages = await prisma.flujoEtapa.findMany({
+      where: { tipo_acto_id: expediente.tipo_acto_id, activa: true },
+      select: {
+        clave: true,
+        nombre: true,
+        orden: true,
+        obligatoria: true,
+        se_puede_omitir: true,
+        duracion_esperada_dias: true,
+        estado_general_relacionado: true,
+      },
+      orderBy: { orden: 'asc' },
+    });
+    const allowedStatuses = getAllowedExpedienteTransitions(expediente.estatus);
+    const transitions = allowedStatuses.map((status) => ({
+      status,
+      label: EXPEDIENTE_STATUS_LABELS[status],
+      stage: workflowStages.find((stage) => stage.estado_general_relacionado === status && stage.orden > currentStageOrder) || null,
+      requires_signature_data: status === 'FIRMA_PROGRAMADA',
+      requires_notes: status === 'ENTREGADO' || status === 'CANCELADO' || status === 'SUSPENDIDO',
+    }));
+    const nextStage = workflowStages.find(
+      (stage) => stage.estado_general_relacionado === expediente.estatus && stage.orden > currentStageOrder,
+    ) || null;
+
+    res.json({
+      ...expediente,
+      workflow: {
+        current_status_label: EXPEDIENTE_STATUS_LABELS[expediente.estatus],
+        transitions,
+        next_stage: nextStage,
+        stages: workflowStages,
+      },
+    });
   } catch (error: any) {
     res.status(500).json({ error: 'Error al obtener detalle del expediente', detail: error.message });
   }
@@ -306,15 +345,58 @@ export const convertCotizacionToExpediente = async (req: Request, res: Response)
 export const transitionEstatus = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { expected_version, nuevo_estatus, notas } = req.body;
-    const actor_user_id = (req as any).user?.id;
+    const { expected_version, nuevo_estatus, nueva_etapa_clave, notas, datos_firma, user_id } = req.body;
+    const actor_user_id = (req as any).user?.id || user_id;
 
     if (!actor_user_id) {
       return res.status(401).json({ error: 'Usuario no autenticado en la sesión' });
     }
 
-    if (expected_version === undefined || !nuevo_estatus) {
-      return res.status(400).json({ error: 'Campos requeridos: expected_version, nuevo_estatus' });
+    if (expected_version === undefined || (!nuevo_estatus && !nueva_etapa_clave)) {
+      return res.status(400).json({ error: 'Campos requeridos: expected_version y un nuevo estado o etapa' });
+    }
+
+    const current = await prisma.expediente.findUnique({
+      where: { id },
+      select: {
+        tipo_acto_id: true,
+        estatus: true,
+        etapaActual: { select: { orden_snapshot: true } },
+      }
+    });
+    if (!current) return res.status(404).json({ error: 'Expediente no encontrado' });
+
+    let resolvedStageKey = nueva_etapa_clave || undefined;
+    const shouldResolveStage = nuevo_estatus && (
+      nuevo_estatus === 'EN_INTEGRACION'
+      || (current.estatus === 'EN_INTEGRACION' && nuevo_estatus === 'EN_PROCESO')
+      || ['PENDIENTE_NOTARIA', 'FIRMA_PROGRAMADA', 'FIRMADO', 'POST_FIRMA', 'ENTREGADO'].includes(nuevo_estatus)
+    );
+    if (!resolvedStageKey && shouldResolveStage) {
+      const stage = await prisma.flujoEtapa.findFirst({
+        where: {
+          tipo_acto_id: current.tipo_acto_id,
+          activa: true,
+          estado_general_relacionado: nuevo_estatus,
+          orden: { gt: current.etapaActual?.orden_snapshot || 0 },
+        },
+        orderBy: { orden: 'asc' },
+        select: { clave: true },
+      });
+      resolvedStageKey = stage?.clave;
+    }
+
+    let signatureData: TransicionPayload['datosFirma'];
+    if (datos_firma) {
+      const signatureDate = new Date(datos_firma.fecha_firma);
+      if (Number.isNaN(signatureDate.getTime())) {
+        return res.status(400).json({ error: 'La fecha de firma no es válida.' });
+      }
+      signatureData = {
+        fechaFirma: signatureDate,
+        lugar: String(datos_firma.lugar || '').trim(),
+        autorizaSaldoPendiente: Boolean(datos_firma.autoriza_saldo_pendiente),
+      };
     }
 
     const workflowService = new ExpedienteWorkflowService(prisma);
@@ -322,14 +404,22 @@ export const transitionEstatus = async (req: Request, res: Response) => {
       expedienteId: id,
       versionActual: Number(expected_version),
       nuevoEstatus: nuevo_estatus as ExpedienteEstatus,
+      nuevaEtapaClave: resolvedStageKey,
       actorUserId: actor_user_id,
-      observaciones: notas
+      observaciones: notas,
+      datosFirma: signatureData,
     });
 
     res.json(expedienteActualizado);
   } catch (error: any) {
-    const statusCode = error.statusCode || (error.message.includes('UNAUTHORIZED') ? 401 : 500);
-    res.status(statusCode).json({ error: error.message });
+    const statusCode = error instanceof ExpedienteWorkflowError
+      ? error.status
+      : error.message?.includes('[409 CONFLICT]')
+        ? 409
+        : error.message?.includes('no válido')
+          ? 401
+          : 400;
+    res.status(statusCode).json({ error: error.message, code: error.code || 'EXPEDIENTE_TRANSITION_FAILED' });
   }
 };
 

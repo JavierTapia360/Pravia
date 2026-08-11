@@ -16,6 +16,7 @@ import { ProyectoEscrituraIA } from '../components/expedientes/ProyectoEscritura
 import { ModalNuevoCompareciente } from '../components/comparecientes/ModalNuevoCompareciente';
 import { ModalVincularCompareciente } from '../components/comparecientes/ModalVincularCompareciente';
 import { ExpedienteFinanzasTab } from '../components/expedientes/ExpedienteFinanzasTab';
+import { ExpedienteWorkflowPanel } from '../components/expedientes/ExpedienteWorkflowPanel';
 
 const CONCEPTOS_CATALOGO = [
   'Honorarios de la notaría',
@@ -464,6 +465,7 @@ export default function ExpedienteDetail() {
       const formData = new FormData();
       formData.append('file', proyectoFileToUpload);
       if (proyectoNotaVersion) formData.append('nota_version', proyectoNotaVersion);
+      formData.append('usuario_id', abogadoId || exp.abogado_id);
 
       const res = await fetch(`/api/expedientes/${exp.id}/proyecto/upload`, {
         method: 'POST',
@@ -486,7 +488,8 @@ export default function ExpedienteDetail() {
     if (!exp) return;
     try {
       await api.patch(`/expedientes/${exp.id}/proyecto/versions/${verId}`, {
-        accion: 'RESTAURAR_VIGENTE'
+        accion: 'RESTAURAR_VIGENTE',
+        usuario_id: abogadoId || exp.abogado_id,
       });
       addToast(`Versión V${verNum} restaurada como Proyecto Vigente`, 'success');
       await loadProyectoData();
@@ -1175,6 +1178,12 @@ export default function ExpedienteDetail() {
           </div>
         </div>
       </section>
+
+      <ExpedienteWorkflowPanel
+        expediente={exp}
+        actorUserId={abogadoId || exp.abogado_id || ''}
+        onUpdated={loadData}
+      />
 
       {/* 2. NAVEGACIÓN PRINCIPAL POR PESTAÑAS */}
       <div className="bg-slate-900/90 border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
