@@ -640,6 +640,52 @@ export class ComparecienteService {
   }
 
   /**
+   * Confirmación humana contextual. La validación pertenece al vínculo con el
+   * expediente y nunca convierte automáticamente propuestas de IA en datos definitivos.
+   */
+  public async validarVinculoExpediente(vinculoId: string, actorUserId: string, datosValidados: boolean) {
+    return this.prisma.$transaction(async (tx) => {
+      const vinculo = await tx.expedienteCompareciente.findFirst({
+        where: { id: vinculoId, archived_at: null, estatus: 'ACTIVO' },
+      });
+      if (!vinculo) throw new Error(`El vínculo con ID '${vinculoId}' no existe o no está activo.`);
+
+      const actualizado = await tx.expedienteCompareciente.update({
+        where: { id: vinculoId },
+        data: {
+          datos_validados: datosValidados,
+          validado_por_id: datosValidados ? actorUserId : null,
+          validado_at: datosValidados ? new Date() : null,
+        },
+      });
+      const correlationId = crypto.randomUUID();
+      await tx.auditLog.create({
+        data: {
+          user_id: actorUserId,
+          accion: datosValidados ? 'VALIDAR_DATOS_COMPARECIENTE' : 'REABRIR_VALIDACION_COMPARECIENTE',
+          entidad: 'ExpedienteCompareciente',
+          entidad_id: vinculoId,
+          valores_anteriores: { datos_validados: vinculo.datos_validados, validado_por_id: vinculo.validado_por_id },
+          valores_nuevos: { datos_validados: actualizado.datos_validados, validado_por_id: actualizado.validado_por_id },
+          detalles: { modulo: 'COMPARECIENTES', expediente_id: vinculo.expediente_id },
+          correlation_id: correlationId,
+        },
+      });
+      await tx.domainEventOutbox.create({
+        data: {
+          event_type: datosValidados ? 'DatosComparecienteValidados' : 'ValidacionComparecienteReabierta',
+          aggregate_type: 'Expediente',
+          aggregate_id: vinculo.expediente_id,
+          actor_user_id: actorUserId,
+          payload: { expediente_id: vinculo.expediente_id, compareciente_id: vinculo.compareciente_id, vinculo_id: vinculoId },
+          correlation_id: correlationId,
+        },
+      });
+      return actualizado;
+    });
+  }
+
+  /**
    * Obtiene el Archivo Documental del Compareciente con URLs firmadas y agrupado por carpetas
    */
   public async obtenerArchivoDocumental(comparecienteId: string) {

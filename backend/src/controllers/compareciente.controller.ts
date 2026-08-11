@@ -102,6 +102,24 @@ export class ComparecienteController {
     }
   }
 
+  public static async validarVinculoExpediente(req: Request, res: Response) {
+    try {
+      const actor = await resolveActiveActor(req, req.body.creado_por_id);
+      if (!actor) return res.status(401).json({ success: false, error: 'Usuario autenticado requerido' });
+      if (typeof req.body.datos_validados !== 'boolean') {
+        return res.status(400).json({ success: false, code: 'VALIDATION_STATUS_REQUIRED', error: 'Indica si los datos fueron validados.' });
+      }
+      const vinculo = await comparecienteService.validarVinculoExpediente(
+        req.params.vinculoId,
+        actor.id,
+        req.body.datos_validados,
+      );
+      return res.status(200).json({ success: true, data: vinculo });
+    } catch (err: any) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  }
+
   public static async desvincularDeExpediente(req: Request, res: Response) {
     try {
       const { vinculoId } = req.params;

@@ -83,6 +83,7 @@ model User {
   identificacionesComparecienteValidadas ComparecienteIdentificacion[] @relation("IdentificacionValidador")
   representantesCorporativosCreados      PersonaMoralRepresentante[]   @relation("RepresentanteCorporativoCreador")
   expedienteComparecientesCreados        ExpedienteCompareciente[]     @relation("ExpedienteComparecienteCreador")
+  expedienteComparecientesValidados      ExpedienteCompareciente[]     @relation("ExpedienteComparecienteValidador")
   expedienteRepresentacionesCreadas      ExpedienteRepresentacion[]    @relation("ExpedienteRepresentacionCreador")
   expedienteRepresentacionesValidadas    ExpedienteRepresentacion[]    @relation("ExpedienteRepresentacionValidador")
 
@@ -1342,6 +1343,9 @@ model ExpedienteCompareciente {
   observaciones       String?
   estatus             String             @default("ACTIVO")
   creado_por_id       String             @db.Uuid
+  datos_validados     Boolean            @default(false)
+  validado_por_id     String?            @db.Uuid
+  validado_at         DateTime?
   created_at          DateTime           @default(now())
   updated_at          DateTime           @updatedAt
   archived_at         DateTime?
@@ -1350,6 +1354,7 @@ model ExpedienteCompareciente {
   compareciente Compareciente         @relation(fields: [compareciente_id], references: [id], onDelete: Restrict)
   caracter      CaracterCompareciente @relation(fields: [caracter_id], references: [id], onDelete: Restrict)
   creado_por    User                  @relation("ExpedienteComparecienteCreador", fields: [creado_por_id], references: [id], onDelete: Restrict)
+  validado_por  User?                 @relation("ExpedienteComparecienteValidador", fields: [validado_por_id], references: [id], onDelete: SetNull)
 
   representacionesComoRepresentado  ExpedienteRepresentacion[] @relation("ExpedienteRepresentadoVinculo")
   representacionesComoRepresentante ExpedienteRepresentacion[] @relation("ExpedienteRepresentanteVinculo")

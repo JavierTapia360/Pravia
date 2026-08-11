@@ -84,6 +84,7 @@ export default function ExpedienteDetail() {
   // Compareciente Modals State
   const [showVincularModal, setShowVincularModal] = useState(false);
   const [showNuevoCompModal, setShowNuevoCompModal] = useState(false);
+  const [validatingLinkId, setValidatingLinkId] = useState<string | null>(null);
 
   // Direct Editable Header State
   const [nombreIdentificacion, setNombreIdentificacion] = useState('');
@@ -237,6 +238,24 @@ export default function ExpedienteDetail() {
   }, [id, loadData]);
 
   const exp = selectedExpediente;
+
+  const handleValidateCompareciente = async (vinculo: any) => {
+    const next = !vinculo.datos_validados;
+    const accepted = window.confirm(next
+      ? 'Confirma que revisaste la ficha y documentos de identidad de este compareciente.'
+      : 'La validación volverá a quedar pendiente. ¿Deseas continuar?');
+    if (!accepted) return;
+    setValidatingLinkId(vinculo.id);
+    try {
+      await api.patch(`/comparecientes/vincular-expediente/${vinculo.id}/validacion`, { datos_validados: next });
+      addToast(next ? 'Datos del compareciente validados.' : 'Validación reabierta.', 'success');
+      await loadData();
+    } catch (error: any) {
+      addToast(error.detail || error.message || 'No fue posible actualizar la validación.', 'error');
+    } finally {
+      setValidatingLinkId(null);
+    }
+  };
 
   useEffect(() => {
     if (exp) {
@@ -1342,7 +1361,16 @@ export default function ExpedienteDetail() {
                         )}
                       </div>
 
-                      <div className="pt-2 flex justify-end border-t border-white/10">
+                      <div className="pt-2 flex flex-wrap justify-end gap-2 border-t border-white/10">
+                        <button
+                          type="button"
+                          onClick={() => handleValidateCompareciente(vinculo)}
+                          disabled={validatingLinkId === vinculo.id}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border flex items-center gap-1 disabled:opacity-40 ${vinculo.datos_validados ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30'}`}
+                        >
+                          {validatingLinkId === vinculo.id ? <RefreshCw size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
+                          {vinculo.datos_validados ? 'Reabrir revisión' : 'Confirmar revisión'}
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleSafeNavigation(`/comparecientes/${persona.id}?fromExpediente=${exp.id}`)}

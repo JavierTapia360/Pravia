@@ -21,10 +21,10 @@ router.post('/persona-moral', ComparecienteController.crearPersonaMoral);
 
 // Endpoints de vinculación contextual en Expedientes
 router.post('/vincular-expediente', ComparecienteController.vincularAExpediente);
+router.patch('/vincular-expediente/:vinculoId/validacion', ComparecienteController.validarVinculoExpediente);
 router.delete('/vincular-expediente/:vinculoId', ComparecienteController.desvincularDeExpediente);
 
 // Archivar / Eliminar compareciente
 router.patch('/:id/archivar', ComparecienteController.archivarCompareciente);
 
 export default router;
-
