@@ -1,12 +1,15 @@
 import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { PrismaClient, ExpedienteEstatus, TipoMovimiento, NaturalezaMovimiento, DocEstatus } from '@prisma/client';
+import { ExpedienteEstatus, TipoMovimiento, NaturalezaMovimiento, DocEstatus } from '@prisma/client';
 import { ExpedienteWorkflowService } from '../services/expedienteWorkflow.service';
 import { calculateExpedienteProgress } from '../services/expedienteProgress.service';
 import { downloadFile, uploadFile, deleteFile } from '../services/supabase.service';
+import prisma from '../config/prisma';
+import { CotizacionConversionService } from '../services/cotizacionConversion.service';
+import { CotizacionBusinessError } from '../domain/cotizacionWorkflow';
 
-const prisma = new PrismaClient();
+const cotizacionConversionService = new CotizacionConversionService(prisma);
 
 // 1. Listar Expedientes con Filtros y Paginación
 export const getExpedientes = async (req: Request, res: Response) => {
@@ -266,190 +269,26 @@ export const createExpediente = async (req: Request, res: Response) => {
 // 4. Conversión de Cotización Aceptada a Expediente
 export const convertCotizacionToExpediente = async (req: Request, res: Response) => {
   try {
-    const { cotizacion_id, abogado_id } = req.body;
-
-    const cotizacion = await prisma.cotizacion.findUnique({
-      where: { id: cotizacion_id },
-      include: { prospecto: true, expediente: true }
+    const { cotizacion_id, abogado_id, tipo_acto_id, user_id } = req.body;
+    const result = await cotizacionConversionService.convert({
+      cotizacionId: cotizacion_id,
+      abogadoId: abogado_id,
+      tipoActoId: tipo_acto_id,
+      actorUserId: (req as any).user?.id || user_id,
+      correlationId: (req as any).correlationId,
     });
-
-    if (!cotizacion) {
-      return res.status(404).json({ error: 'Cotización no encontrada en el sistema.' });
-    }
-
-    if (cotizacion.expediente || (cotizacion.estado as string) === 'CONVERTIDA_EXPEDIENTE') {
-      return res.status(400).json({ error: 'La cotización ya fue convertida a expediente previamente.' });
-    }
-
-    // Transacción atómica de conversión
-    const expediente = await prisma.$transaction(async (tx) => {
-      // 1. Obtener y validar el Tipo de Acto del catálogo maestro
-      let targetTipoActoId = (cotizacion as any).tipo_acto_id || (cotizacion.prospecto as any)?.tipo_acto_id;
-      let tipoActo = null;
-
-      if (targetTipoActoId) {
-        tipoActo = await tx.tipoActo.findUnique({
-          where: { id: targetTipoActoId },
-          select: { id: true, activo: true, nombre: true }
-        });
-      }
-
-      if (!tipoActo || !tipoActo.activo) {
-        const nombreBuscado = cotizacion.prospecto?.tipo_acto || 'Compraventa Inmobiliaria';
-        tipoActo = await tx.tipoActo.findFirst({
-          where: {
-            activo: true,
-            OR: [
-              { nombre: { contains: nombreBuscado, mode: 'insensitive' } },
-              { nombre: { contains: 'Compraventa', mode: 'insensitive' } }
-            ]
-          },
-          select: { id: true, activo: true, nombre: true }
-        });
-      }
-
-      if (!tipoActo || !tipoActo.activo) {
-        throw new Error('No fue posible crear el expediente porque la cotización no tiene un Tipo de Acto válido asignado.');
-      }
-
-      // 2. Resolver usuario Creador y Abogado válidos
-      const defaultUser = await tx.user.findFirst({ where: { activo: true } });
-      const defaultUserId = defaultUser?.id || '8127559a-e44f-4f44-97de-cbebc68d7cd3';
-
-      const finalAbogadoId = (abogado_id && typeof abogado_id === 'string' && abogado_id.trim() !== '') 
-        ? abogado_id 
-        : defaultUserId;
-
-      const reqUserId = (req as any).user?.id;
-      const finalCreadorId = (reqUserId && typeof reqUserId === 'string' && reqUserId.trim() !== '') 
-        ? reqUserId 
-        : finalAbogadoId;
-
-      // 3. Resolver versiones vigentes de Formulario, Flujo y Plantilla Documental
-      const [formVer, flujoVer, plantDocVer] = await Promise.all([
-        tx.formularioVersion.findFirst({ where: { tipo_acto_id: tipoActo.id }, orderBy: { version: 'desc' } }),
-        tx.flujoVersion.findFirst({ where: { tipo_acto_id: tipoActo.id }, orderBy: { version: 'desc' } }),
-        tx.plantillaDocumentalVersion.findFirst({ where: { tipo_acto_id: tipoActo.id }, orderBy: { version: 'desc' } })
-      ]);
-
-      // 4. Generar Folio Único Concurrente
-      const countAño = await tx.expediente.count();
-      const añoActual = new Date().getFullYear();
-      const numero_pravia = `EXP-${añoActual}-${String(countAño + 1).padStart(4, '0')}`;
-
-      // 5. Crear Expediente usando relaciones connect explícitas y omitiendo undefined
-      const expCreateData: any = {
-        numero_pravia,
-        tipo_acto: { connect: { id: tipoActo.id } },
-        cotizacion: { connect: { id: cotizacion.id } },
-        creador: { connect: { id: finalCreadorId } },
-        abogado: { connect: { id: finalAbogadoId } },
-        cliente_alias: cotizacion.prospecto?.nombre || (cotizacion as any).cliente_alias || 'Cliente Cotización',
-        valor_operacion: cotizacion.total_cliente ? Number(cotizacion.total_cliente) : undefined,
-        estatus: 'ABIERTO'
-      };
-
-      if (cotizacion.notaria_id) {
-        expCreateData.notaria = { connect: { id: cotizacion.notaria_id } };
-      }
-      if (formVer?.id) {
-        expCreateData.formularioVersion = { connect: { id: formVer.id } };
-      }
-      if (flujoVer?.id) {
-        expCreateData.flujoVersion = { connect: { id: flujoVer.id } };
-      }
-      if (plantDocVer?.id) {
-        expCreateData.plantillaDocVersion = { connect: { id: plantDocVer.id } };
-      }
-
-      const exp = await tx.expediente.create({ data: expCreateData });
-
-      // 6. Actualizar Estado de la Cotización
-      await tx.cotizacion.update({
-        where: { id: cotizacion.id },
-        data: {
-          estado: 'CONVERTIDA_EXPEDIENTE',
-          fecha_conversion_expediente: new Date()
-        }
-      });
-
-      // 7. Vincular Documentos Inheredados de Prospecto y Cotización (Sin duplicación física)
-      const prospectoId = cotizacion.prospecto_id;
-      const cotizacionId = cotizacion.id;
-
-      const [pDocs, pVinculos, cDocs, cVinculos] = await Promise.all([
-        prospectoId ? tx.documento.findMany({ where: { prospecto_id: prospectoId } }) : [],
-        prospectoId ? tx.prospectoDocumento.findMany({ where: { prospecto_id: prospectoId, estatus: 'ACTIVO' } }) : [],
-        tx.documento.findMany({ where: { cotizacion_id: cotizacionId } }),
-        tx.cotizacionDocumento.findMany({ where: { cotizacion_id: cotizacionId, estatus: 'ACTIVO' } })
-      ]);
-
-      const docMap = new Map<string, { docId: string; folder: string }>();
-
-      pDocs.forEach(d => {
-        docMap.set(d.id, { docId: d.id, folder: 'Administrativo' });
-      });
-
-      pVinculos.forEach(v => {
-        if (!docMap.has(v.documento_id)) {
-          docMap.set(v.documento_id, { docId: v.documento_id, folder: 'Administrativo' });
-        }
-      });
-
-      cDocs.forEach(d => {
-        docMap.set(d.id, { docId: d.id, folder: 'Administrativo' });
-      });
-
-      cVinculos.forEach(v => {
-        if (!docMap.has(v.documento_id)) {
-          docMap.set(v.documento_id, { docId: v.documento_id, folder: 'Administrativo' });
-        }
-      });
-
-      for (const item of Array.from(docMap.values())) {
-        await tx.expedienteDocumento.upsert({
-          where: {
-            expediente_id_documento_id_tipo_vinculo: {
-              expediente_id: exp.id,
-              documento_id: item.docId,
-              tipo_vinculo: item.folder
-            }
-          },
-          update: { estatus: 'ACTIVO' },
-          create: {
-            expediente_id: exp.id,
-            documento_id: item.docId,
-            tipo_vinculo: item.folder,
-            creado_por_id: finalCreadorId,
-            estatus: 'ACTIVO'
-          }
-        });
-      }
-
-      // 8. Bitácora de Actividad Auditoría
-      await tx.expedienteActividad.create({
-        data: {
-          expediente_id: exp.id,
-          usuario_id: finalCreadorId,
-          tipo: 'AUDITORIA',
-          titulo: 'Conversión Transaccional desde Cotización',
-          descripcion: `Expediente aperturado desde Cotización ${cotizacion.numero_solicitud || ''}. Vinculados ${docMap.size} documento(s) heredados.`
-        }
-      });
-
-      return exp;
+    res.status(result.alreadyConverted ? 200 : 201).json({
+      ...result.expediente,
+      idempotent: result.alreadyConverted,
+      correlation_id: result.correlationId,
+      anticipo_validado: result.validatedAdvanceTotal,
     });
-
-    res.status(201).json(expediente);
   } catch (error: any) {
     console.error('[CONVERT_COTIZACION_ERROR]', error);
-
-    let cleanMessage = 'No fue posible crear el expediente porque la cotización no tiene un Tipo de Acto válido asociado.';
-    if (error.message && typeof error.message === 'string' && !error.message.includes('Prisma') && !error.message.includes('Invocation') && !error.message.includes('\\')) {
-      cleanMessage = error.message;
+    if (error instanceof CotizacionBusinessError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
     }
-
-    res.status(400).json({ error: cleanMessage });
+    res.status(500).json({ error: 'No fue posible convertir la cotización a expediente.', code: 'CONVERSION_FAILED' });
   }
 };
 

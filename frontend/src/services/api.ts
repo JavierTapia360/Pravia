@@ -1,4 +1,6 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+// Same-origin by default: Vite proxies `/api` in development and production can
+// either serve both layers together or set VITE_API_URL explicitly.
+const API_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 
 class ApiError extends Error {
   constructor(public status: number, message: string, public detail?: string) {

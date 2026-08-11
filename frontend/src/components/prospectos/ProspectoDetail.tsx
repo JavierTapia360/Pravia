@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { SlideOver } from '../ui/SlideOver';
 import { Timeline, TimelineEvent } from '../ui/Timeline';
 import { Badge } from '../ui/Badge';
@@ -60,6 +61,7 @@ interface ProspectoDetailProps {
 }
 
 export function ProspectoDetail({ prospecto, isOpen, onClose, onEdit, onArchive }: ProspectoDetailProps) {
+  const navigate = useNavigate();
   const { fetchProspectoById, selectedProspecto, addSeguimiento, updateProspecto } = useProspectoStore();
   const [showSeguimientoForm, setShowSeguimientoForm] = useState(false);
   const [activeTab, setActiveTab] = useState<'resumen' | 'historial' | 'documentos'>('resumen');
@@ -146,8 +148,19 @@ export function ProspectoDetail({ prospecto, isOpen, onClose, onEdit, onArchive 
           <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setShowSeguimientoForm(true)}>
             <Plus size={16} /> Agregar Seguimiento
           </button>
-          <button className="btn btn-secondary" disabled style={{ flex: 1, opacity: 0.5 }} title="Disponible en Fase 3">
-            <FileText size={16} /> Generar Cotización
+          <button
+            className="btn btn-secondary"
+            style={{ flex: 1 }}
+            onClick={() => {
+              onClose();
+              if (detail.cotizacion?.id) {
+                navigate(`/cotizaciones?cotizacion=${detail.cotizacion.id}`);
+              } else {
+                navigate(`/cotizaciones?nueva=1&prospecto=${detail.id}`);
+              }
+            }}
+          >
+            <FileText size={16} /> {detail.cotizacion?.id ? 'Abrir Cotización' : 'Generar Cotización'}
           </button>
           <button className="btn btn-secondary" onClick={() => onEdit(detail)}>
             Editar

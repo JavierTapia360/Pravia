@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, Search, Filter, Clock, AlertCircle, FileText, CheckCircle2, Building2, User, RefreshCw, Layers } from 'lucide-react';
 import { api } from '../services/api';
 import WizardCotizacion from '../components/cotizaciones/WizardCotizacion';
@@ -37,7 +38,12 @@ function timeSince(date: string | null) {
 
 function getProximaAccionText(c: any) {
   if (c.estado === 'CONVERTIDA_EXPEDIENTE') return 'Gestoría: Integración de Expediente';
-  if (c.estado === 'ACEPTADA') return 'Recepción / Abogado: Aperturar expediente';
+  if (c.estado === 'ACEPTADA') {
+    const hasValidatedAdvance = c.pagos?.some((payment: any) => payment.estatus === 'VALIDADO' && Number(payment.monto) > 0);
+    return hasValidatedAdvance
+      ? 'Abogado: Aperturar expediente'
+      : 'Administración: Registrar y validar anticipo';
+  }
   if (c.estado === 'ENVIADA_CLIENTE' || c.estado === 'EN_NEGOCIACION') return 'Cliente: Decisión de propuesta';
   if (c.estado === 'PRESUPUESTO_RECIBIDO' || c.estado === 'EN_REVISION_ABOGADO') return 'Abogado: Revisar desglose y aprobar';
   if (c.estado === 'ENVIADA_NOTARIA') return 'Notaría: Emisión de presupuesto';
@@ -45,6 +51,7 @@ function getProximaAccionText(c: any) {
 }
 
 export default function Cotizaciones() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [cotizaciones, setCotizaciones] = useState<any[]>([]);
@@ -72,6 +79,13 @@ export default function Cotizaciones() {
   useEffect(() => {
     fetchCotizaciones();
   }, [fetchCotizaciones]);
+
+  useEffect(() => {
+    const requestedQuoteId = searchParams.get('cotizacion');
+    const requestedProspectId = searchParams.get('prospecto');
+    if (requestedQuoteId) setSelectedId(requestedQuoteId);
+    if (searchParams.get('nueva') === '1' && requestedProspectId) setIsWizardOpen(true);
+  }, [searchParams]);
 
   // KPI counts
   const borradorCount = cotizaciones.filter(c => c.estado === 'BORRADOR').length;
@@ -127,6 +141,7 @@ export default function Cotizaciones() {
           type="button"
           onClick={(e) => {
             e.stopPropagation();
+            setSearchParams({});
             setIsWizardOpen(true);
           }}
           className="btn btn-primary"
@@ -169,7 +184,7 @@ export default function Cotizaciones() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 'var(--space-3)' }}>
             <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--color-info)' }}>{esperaNotariaCount}</span>
             {retrasadasCount > 0 ? (
-              <span className="badge badge-danger">⚠️ {retrasadasCount} retrasada</span>
+              <span className="badge badge-danger"><AlertCircle size={12} aria-hidden="true" /> {retrasadasCount} retrasada</span>
             ) : (
               <span style={{ fontSize: '0.75rem', color: 'var(--color-success)' }}>Al día</span>
             )}
@@ -397,7 +412,7 @@ export default function Cotizaciones() {
                       <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
                         <span>{timeSince(c.fecha_solicitud_notaria)}</span>
                         {isRetrasada && (
-                          <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--color-danger)', fontWeight: 'bold' }}>⚠️ Retrasada</span>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '0.7rem', color: 'var(--color-danger)', fontWeight: 'bold' }}><AlertCircle size={11} aria-hidden="true" /> Retrasada</span>
                         )}
                       </td>
                       <td style={{ padding: 'var(--space-3) var(--space-4)', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
@@ -415,9 +430,14 @@ export default function Cotizaciones() {
       {/* ── WIZARD MODAL ── */}
       <WizardCotizacion
         isOpen={isWizardOpen}
-        onClose={() => setIsWizardOpen(false)}
+        initialProspectoId={searchParams.get('prospecto')}
+        onClose={() => {
+          setIsWizardOpen(false);
+          setSearchParams({});
+        }}
         onSuccess={() => {
           setIsWizardOpen(false);
+          setSearchParams({});
           fetchCotizaciones();
         }}
       />
@@ -426,7 +446,10 @@ export default function Cotizaciones() {
       {selectedId && (
         <CotizacionDetail
           cotizacionId={selectedId}
-          onClose={() => setSelectedId(null)}
+          onClose={() => {
+            setSelectedId(null);
+            if (searchParams.get('cotizacion')) setSearchParams({});
+          }}
           onUpdate={fetchCotizaciones}
         />
       )}

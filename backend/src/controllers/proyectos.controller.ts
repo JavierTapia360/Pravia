@@ -7,11 +7,9 @@ import mammoth from 'mammoth';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType } from 'docx';
 import Docxtemplater from 'docxtemplater';
 import PizZip from 'pizzip';
-import { PrismaClient } from '@prisma/client';
 import { downloadFile } from '../services/supabase.service';
 import { analizarProyectoNotarialConOpenAI, DocumentoParaExtraccion } from '../services/openaiDocument.service';
-
-const prisma = new PrismaClient();
+import prisma from '../config/prisma';
 
 const PROYECTOS_DIR = path.join(__dirname, '../../uploads/proyectos');
 const REPORTES_DIR = path.join(__dirname, '../../uploads/reportes_ia');

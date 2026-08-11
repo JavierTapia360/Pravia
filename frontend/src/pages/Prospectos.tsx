@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Users, AlertTriangle } from 'lucide-react';
+import { Plus, Users, AlertTriangle, Filter, X } from 'lucide-react';
 import { DataTable, ColumnDef } from '../components/ui/DataTable';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
@@ -7,6 +7,7 @@ import { ProspectoForm } from '../components/prospectos/ProspectoForm';
 import { ProspectoDetail } from '../components/prospectos/ProspectoDetail';
 import { useProspectoStore, Prospecto } from '../stores/prospectoStore';
 import { useToastStore } from '../stores/toastStore';
+import { LoadingState } from '../components/ui/AsyncState';
 
 const ESTADO_VARIANT: Record<string, any> = {
   NUEVO: 'info', INFO_PENDIENTE: 'warning', DOCS_RECIBIDOS: 'default',
@@ -94,6 +95,8 @@ export default function Prospectos() {
   const [detailProspecto, setDetailProspecto] = useState<Prospecto | null>(null);
   const [toArchive, setToArchive] = useState<Prospecto | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
+  const [estadoFilter, setEstadoFilter] = useState('TODOS');
+  const [prioridadFilter, setPrioridadFilter] = useState('TODAS');
 
   useEffect(() => {
     fetchProspectos().catch(() => toast.add('No se pudo conectar al servidor. Verifica que el backend esté corriendo en el puerto 3001.', 'error'));
@@ -104,6 +107,11 @@ export default function Prospectos() {
     const ref = s ? s.created_at : p.created_at;
     return Math.floor((Date.now() - new Date(ref).getTime()) / (1000 * 60 * 60 * 24)) >= 5;
   }).length;
+
+  const filteredProspectos = prospectos.filter((prospecto) => (
+    (estadoFilter === 'TODOS' || prospecto.estado === estadoFilter)
+    && (prioridadFilter === 'TODAS' || prospecto.prioridad === prioridadFilter)
+  ));
 
   const handleCreate = async (data: any) => {
     await createProspecto(data);   // throws on error — form shows the error banner
@@ -156,14 +164,40 @@ export default function Prospectos() {
         </div>
       </div>
 
+      <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap', marginBottom: 'var(--space-4)', padding: 'var(--space-3)' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--text-secondary)', fontSize: '0.8rem', fontWeight: 700 }}>
+          <Filter size={15} aria-hidden="true" /> Filtros
+        </span>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+          Estado
+          <select className="input-field" value={estadoFilter} onChange={(event) => setEstadoFilter(event.target.value)} style={{ width: 'auto', minWidth: '180px' }}>
+            <option value="TODOS">Todos</option>
+            {Object.keys(ESTADO_VARIANT).map((estado) => <option key={estado} value={estado}>{estado.replace(/_/g, ' ')}</option>)}
+          </select>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+          Prioridad
+          <select className="input-field" value={prioridadFilter} onChange={(event) => setPrioridadFilter(event.target.value)} style={{ width: 'auto', minWidth: '130px' }}>
+            <option value="TODAS">Todas</option>
+            <option value="ALTA">Alta</option>
+            <option value="MEDIA">Media</option>
+            <option value="BAJA">Baja</option>
+          </select>
+        </label>
+        <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: '0.8rem' }}>{filteredProspectos.length} de {prospectos.length}</span>
+        {(estadoFilter !== 'TODOS' || prioridadFilter !== 'TODAS') && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setEstadoFilter('TODOS'); setPrioridadFilter('TODAS'); }}>
+            <X size={14} aria-hidden="true" /> Limpiar
+          </button>
+        )}
+      </div>
+
       {/* DataTable */}
       {isLoading ? (
-        <div style={{ textAlign: 'center', padding: 'var(--space-12)', color: 'var(--text-muted)' }}>
-          Cargando prospectos...
-        </div>
+        <LoadingState label="Cargando prospectos" rows={6} />
       ) : (
         <DataTable<Prospecto>
-          data={prospectos}
+          data={filteredProspectos}
           columns={columns}
           searchPlaceholder="Buscar por nombre, correo, teléfono, tipo de acto..."
           globalFilterFn={(item, q) =>

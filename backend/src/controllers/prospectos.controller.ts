@@ -3,20 +3,11 @@ import prisma from '../config/prisma';
 import { logAudit } from '../utils/auditLogger';
 import { ProspectoEstado } from '@prisma/client';
 
-// Helper for development: get or create a default user
-const getOrCreateDefaultUser = async () => {
-  let user = await prisma.user.findFirst();
-  if (!user) {
-    user = await prisma.user.create({
-      data: {
-        email: 'admin@pravia.com',
-        nombre: 'Administrador',
-        apellido: 'Sistema',
-        password_hash: 'dummy',
-        rol: 'DIRECCION',
-      }
-    });
-  }
+// Fallback temporal mientras la sesión real se integra en la fase de Auth.
+// Nunca crea identidades ficticias en la base de datos.
+const getDefaultUserId = async () => {
+  const user = await prisma.user.findFirst({ where: { activo: true }, orderBy: { created_at: 'asc' } });
+  if (!user) throw new Error('No existe un usuario activo para registrar la operación.');
   return user.id;
 };
 
@@ -66,7 +57,7 @@ export const createProspecto = async (req: Request, res: Response) => {
     console.log('📥 POST /api/prospectos body:', JSON.stringify(req.body, null, 2));
 
     const { user_id, ...rawData } = req.body;
-    const userId = user_id || await getOrCreateDefaultUser();
+    const userId = user_id || await getDefaultUserId();
 
     // Sanitize: remove empty strings, convert to null for optional fields
     const data: any = {};
@@ -142,7 +133,7 @@ export const updateProspecto = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { user_id, ...data } = req.body;
-    const userId = user_id || await getOrCreateDefaultUser();
+    const userId = user_id || await getDefaultUserId();
 
     // Remove undefined/empty fields to avoid overwriting with blanks
     const cleanData: any = {};
@@ -167,7 +158,7 @@ export const deleteProspecto = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { user_id, motivo } = req.body;
-    const userId = user_id || await getOrCreateDefaultUser();
+    const userId = user_id || await getDefaultUserId();
 
     const prospecto = await prisma.prospecto.update({
       where: { id },
@@ -190,7 +181,7 @@ export const addSeguimiento = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { user_id, tipo, contenido, proxima_accion, fecha_proximo_seguimiento } = req.body;
-    const userId = user_id || await getOrCreateDefaultUser();
+    const userId = user_id || await getDefaultUserId();
 
     if (!tipo || !contenido) {
       return res.status(400).json({ error: 'Los campos "tipo" y "contenido" son obligatorios.' });

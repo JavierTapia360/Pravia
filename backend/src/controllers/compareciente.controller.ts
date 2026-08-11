@@ -1,8 +1,7 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { ComparecienteService } from '../services/compareciente.service';
+import prisma from '../config/prisma';
 
-const prisma = new PrismaClient();
 const comparecienteService = new ComparecienteService(prisma);
 
 export class ComparecienteController {
