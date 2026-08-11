@@ -13,6 +13,7 @@ import {
 import { useAuthStore } from '../../stores/authStore';
 import { isAppRole, navigationForRole, roleLabels } from '../../config/navigation';
 import type { AppRole } from '../../config/navigation';
+import { miDiaService } from '../../services/miDia.service';
 
 export default function MainLayout() {
   const { user, logout } = useAuthStore();
@@ -23,6 +24,7 @@ export default function MainLayout() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
+  const [attentionCount, setAttentionCount] = useState(0);
 
   const navigation = useMemo(() => navigationForRole(user?.rol), [user?.rol]);
   const searchableItems = useMemo(() => navigation.flatMap((group) => group.items), [navigation]);
@@ -59,6 +61,18 @@ export default function MainLayout() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    miDiaService.getDashboard()
+      .then((dashboard) => {
+        if (active) setAttentionCount(Array.isArray(dashboard?.alertas) ? dashboard.alertas.length : 0);
+      })
+      .catch(() => {
+        if (active) setAttentionCount(0);
+      });
+    return () => { active = false; };
+  }, [location.pathname, user?.id]);
 
   const selectSearchResult = (to: string) => {
     navigate(to);
@@ -184,9 +198,9 @@ export default function MainLayout() {
                 </div>
               )}
             </div>
-            <button type="button" className="icon-button" onClick={() => navigate('/riesgos')} aria-label="Abrir riesgos y cumplimiento" title="Riesgos y cumplimiento">
+            <button type="button" className="icon-button" onClick={() => navigate('/riesgos')} aria-label={attentionCount > 0 ? `Abrir riesgos y cumplimiento; ${attentionCount} alertas requieren atención` : 'Abrir riesgos y cumplimiento'} title={attentionCount > 0 ? `${attentionCount} alertas requieren atención` : 'Riesgos y cumplimiento'}>
               <AlertTriangle size={19} />
-              <span className="attention-dot" aria-hidden="true" />
+              {attentionCount > 0 && <span className="attention-dot" aria-hidden="true" />}
             </button>
             <button type="button" className="icon-button" onClick={() => navigate('/agenda')} aria-label="Abrir agenda y notificaciones" title="Agenda y notificaciones">
               <Bell size={19} />
