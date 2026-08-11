@@ -1,5 +1,6 @@
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
+RUN apk add --no-cache openssl
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
@@ -10,9 +11,10 @@ RUN npx prisma generate && npm run build
 FROM build AS migrate
 CMD ["npx", "prisma", "migrate", "deploy"]
 
-FROM node:20-alpine AS runtime
+FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
+RUN apk add --no-cache openssl
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 RUN npm prune --omit=dev && npm cache clean --force
