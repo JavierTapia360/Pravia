@@ -362,9 +362,9 @@ export const updateNotaria = async (req: Request, res: Response) => {
           activa: activa !== undefined ? Boolean(activa) : existingNotaria.activa,
           predeterminada: isDefault,
           color_identificador: color_identificador || existingNotaria.color_identificador,
-          tipos_acto_json: tiposActo !== undefined ? tiposActo : existingNotaria.tipos_acto_json,
-          instituciones_json: instituciones !== undefined ? instituciones : existingNotaria.instituciones_json,
-          municipios_atendidos_json: municipiosAtendidos !== undefined ? municipiosAtendidos : existingNotaria.municipios_atendidos_json
+          tipos_acto_json: tiposActo !== undefined ? tiposActo : (existingNotaria.tipos_acto_json ?? []),
+          instituciones_json: instituciones !== undefined ? instituciones : (existingNotaria.instituciones_json ?? []),
+          municipios_atendidos_json: municipiosAtendidos !== undefined ? municipiosAtendidos : (existingNotaria.municipios_atendidos_json ?? [])
         }
       });
 
