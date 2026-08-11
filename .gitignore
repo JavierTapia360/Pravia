@@ -1,0 +1,31 @@
+# Dependencias y compilaciones
+**/node_modules/
+**/dist/
+**/coverage/
+**/vite.config.ts.timestamp-*.mjs
+
+# Variables de entorno y secretos
+.env
+**/.env
+**/.env.*
+!**/.env.example
+
+# Archivos operativos, documentos y respaldos locales
+backend/uploads/
+backend/backups/
+backend/prisma/backups/
+backend/debug/
+backend/scratch/
+
+# Temporales y registros
+*.log
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Configuración local de editores/agentes
+.vscode/
+.idea/
+.codex/
+.agents/
