@@ -7,6 +7,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "check:env": "ts-node scripts/check-env.ts",
+    "check:db": "ts-node scripts/verify-runtime-database.ts",
     "seed": "ts-node prisma/seed.ts",
     "db:migrate": "npx prisma migrate dev",
     "db:push": "npx prisma db push",
