@@ -72,10 +72,11 @@ La IA pagada está apagada por defecto para proteger el presupuesto. Solo se eje
 - smoke público aprobado: rutas privadas redirigen a login y recuperación es accesible;
 - smoke autenticado aprobado en entorno local aislado para Mi Día, prospectos, cotizaciones, expedientes, comparecientes, agenda y reportes;
 - recorrido crítico completo aprobado en PostgreSQL 17 y Storage local aislados: login, ciclo comercial, anticipo, conversión idempotente, compareciente reutilizado y validado, documento privado, guardado/recarga, finanzas, firma, postfirma y entrega;
+- integración remota de solo lectura aprobada: 8/8 controles de esquema, conteos, Storage keys, hitos estructurales, cumplimiento, RLS e índices;
 - imágenes de backend (Node 22 + OpenSSL) y frontend/Nginx construidas correctamente con Docker;
 - escaneo actual sin secretos no reconocidos; existe una huella histórica reconocida de un antiguo valor de desarrollo y se exige no reutilizarlo/rotarlo.
 
-Las cifras IA son mediciones del contrato con salidas sintéticas, no afirmaciones sobre precisión real del proveedor. La llamada pagada con PDF sintético no se ejecutó: el entorno solicitó una autorización explícita adicional antes de enviar el archivo a OpenAI, por lo que no hubo envío ni costo. La integración remota de solo lectura sigue pendiente por conectividad. Ninguna prueba mutante se ejecutó contra los 7 expedientes y 65 documentos existentes.
+Las cifras IA son mediciones del contrato con salidas sintéticas, no afirmaciones sobre precisión real del proveedor. La llamada pagada con PDF sintético no se ejecutó: el entorno solicitó una autorización explícita adicional antes de enviar el archivo a OpenAI, por lo que no hubo envío ni costo. Ninguna prueba mutante se ejecutó contra los 7 expedientes y 65 documentos existentes.
 
 La historia incremental heredada no puede arrancar por sí sola una base completamente vacía porque su primera migración presupone tipos previos. Se añadió `npm run db:init-empty`, que genera la línea base desde el esquema vigente, la aplica en una transacción y registra las 15 migraciones existentes. Se verificó que funciona sobre PostgreSQL 17 vacío y que rechaza una segunda ejecución sobre un destino con tablas.
 
@@ -83,16 +84,14 @@ La historia incremental heredada no puede arrancar por sí sola una base complet
 
 Se añadió un primer lote de índices para rutas de documentos, expedientes, cotizaciones, finanzas, agenda, cumplimiento y comunicaciones. Después se preparó un segundo lote que completa las llaves foráneas de `pravia_os`. No se eliminó ningún índice marcado como “unused”: con una base pequeña esa señal no justifica una acción destructiva.
 
-El Performance Advisor pasó de 118 a 49 llaves foráneas sin índice tras el primer lote. De las 49 restantes, 43 son del esquema operativo y están cubiertas por la segunda migración; las otras seis pertenecen a tablas legadas de `public`, bloqueadas y sin consumidores. La aplicación remota del segundo lote debe verificarse antes del corte final.
+El Performance Advisor pasó de 118 a 49 llaves foráneas sin índice tras el primer lote. De las 49 restantes, 43 pertenecían al esquema operativo y quedaron cubiertas por la segunda migración; las otras seis son tablas legadas de `public`, bloqueadas y sin consumidores. La verificación SQL remota posterior confirmó cero llaves foráneas de `pravia_os` sin índice utilizable. Las migraciones `20260811051000` y `20260811052000` se aplicaron y las 15 migraciones vigentes quedaron reconciliadas con las dos entradas históricas conservadas; `prisma migrate status` reporta el esquema al día.
 
 ## Criterios de salida a producción
 
 La salida queda bloqueada hasta cumplir todos:
 
-- aplicar las migraciones pendientes y volver a ejecutar Security/Performance Advisors;
 - configurar una clave JWT nueva de al menos 32 caracteres;
 - activar una cuenta Dirección con hash bcrypt válido;
-- ejecutar integración de solo lectura con resultado verde;
 - conservar el reporte del smoke autenticado y del E2E crítico ya aprobados en base aislada;
 - ejecutar backup y verificarlo antes de migrar;
 - servir por HTTPS y confirmar cookies `Secure`;

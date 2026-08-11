@@ -43,6 +43,8 @@ docker compose -f docker-compose.cloud.example.yml up -d backend frontend
 
 La migración debe terminar antes de iniciar la imagen nueva. Las migraciones de esta fase son aditivas (`CREATE INDEX IF NOT EXISTS` y columnas de validación con valor predeterminado); no eliminan filas ni cambian IDs.
 
+En la instalación cloud vigente, ambas migraciones finales fueron aplicadas y el historial fue reconciliado sin retirar las dos entradas heredadas. El estado remoto reporta las 15 migraciones actuales al día; no volver a baselinar ni ejecutar SQL manual en el corte.
+
 En un PostgreSQL 17 nuevo y vacío, inicializar una sola vez desde `backend`:
 
 ```text

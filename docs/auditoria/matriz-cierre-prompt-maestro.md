@@ -11,7 +11,7 @@ Esta matriz evita declarar terminado el proyecto solo porque compila. “Verific
 | Aceptación + anticipo validado → expediente | Verificado | Conversión transaccional, auditoría, idempotencia y E2E aislado aprobado |
 | Guardado dirty-state de expediente | Verificado | Cabecera/rubros/participación atómicos y persistencia tras recarga comprobada |
 | Compareciente maestro reutilizable | Verificado | Alta, reutilización en dos expedientes y vínculo contextual aprobados en E2E |
-| Validación humana antes de firma | Preparado; migración remota pendiente | Migración aditiva `add_compareciente_link_validation`, auditoría, evento y acción UI |
+| Validación humana antes de firma | Verificado | Migración aplicada, auditoría, evento, acción UI y contrato remoto aprobado |
 | Documentos privados y firmados | Verificado | Storage privado, streaming/firmas cortas, trazabilidad y vínculos |
 | Proyecto de escritura/versiones/IA | Verificado | Versiones, vigente/aprobada protegida, análisis y leyenda de revisión profesional |
 | Firma → postfirma → entrega | Verificado | Máquina de estados y fechas finales aprobadas en recorrido E2E aislado |
@@ -27,11 +27,11 @@ Esta matriz evita declarar terminado el proyecto solo porque compila. “Verific
 | PWA | Verificado | Manifest, iconos, SW, shell offline y bloqueo de escrituras offline |
 | Cloud/local/hybrid | Verificado a nivel arquitectura | Selectores centrales, proveedores Storage y herramientas backup/restore/verify |
 | Unit tests | Verificado | 65 pruebas en 13 archivos |
-| Integración DB | Preparado; ejecución final pendiente | Suite read-only creada; última ejecución bloqueada por conectividad del entorno |
+| Integración DB | Verificado | 8/8 controles remotos read-only aprobados; 1 usuario, 7 expedientes y 65 documentos preservados |
 | E2E UI autenticado | Verificado local | Smoke Playwright aprobado en siete módulos privados con cuenta sintética aislada |
 | E2E 11 flujos críticos | Verificado local | Recorrido completo aprobado en PostgreSQL 17 + Storage local aislados; IA pagada permanece opcional |
 | Performance frontend | Verificado | Presupuestos gzip verdes y lazy chunks medidos |
-| Performance PostgreSQL | Parcial | Primer lote aplicado; segundo lote operativo preparado pero pendiente de aplicación/verificación remota |
+| Performance PostgreSQL | Verificado | Ambos lotes aplicados; cero FKs operativas sin índice utilizable |
 | Secretos | Verificado con acción operativa | Cero hallazgos actuales; valor histórico de desarrollo identificado por huella y rotación obligatoria |
 | Base local nueva | Verificado | Bootstrap transaccional probado, 15 migraciones baselined, cero pendientes y rechazo sobre destino no vacío |
 | Contenedores/despliegue/reversa | Preparado y construido localmente | Imágenes backend/frontend, Nginx, Compose y runbook |
@@ -39,9 +39,8 @@ Esta matriz evita declarar terminado el proyecto solo porque compila. “Verific
 
 ## Bloqueadores reales para declarar producción
 
-1. Aplicar remotamente las migraciones `20260811051000` y `20260811052000` y verificar asesores.
-2. Configurar secretos finales y activar deliberadamente una cuenta Dirección; la cuenta preservada no tiene hash bcrypt válido.
-3. Ejecutar integración remota de solo lectura con acceso autorizado.
-4. Aprobar, si se desea como gate contractual, una única llamada real de IA con documento inequívocamente sintético; el resto del flujo IA ya está validado offline y esta llamada no es necesaria para operar sin IA.
+1. Configurar secretos finales y activar deliberadamente una cuenta Dirección; la cuenta preservada no tiene hash bcrypt válido.
+2. Completar el corte de infraestructura: respaldo verificado, HTTPS, webhook de recuperación y responsables de rotación/restauración.
+3. Aprobar, si se desea como gate contractual, una única llamada real de IA con documento inequívocamente sintético; el resto del flujo IA ya está validado offline y esta llamada no es necesaria para operar sin IA.
 
 Los smoke autenticados y el recorrido crítico ya fueron cerrados localmente, siempre fuera de NOTARYPROY. Hasta resolver los bloqueadores remotos, el código está preparado para el corte pero la instalación no debe etiquetarse como producción aprobada.
