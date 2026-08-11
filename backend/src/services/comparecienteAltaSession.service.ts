@@ -517,7 +517,8 @@ export class ComparecienteAltaSessionService {
       _ia_resumen: resultadoIA.resumen_ejecutivo || `Extracción completada sobre ${documentosParaIA.length} documentos.`,
       _ia_alertas: resultadoIA.alertas || [],
       _ia_proveedor: resultadoIA.proveedor,
-      _ia_modelo: resultadoIA.modelo
+      _ia_modelo: resultadoIA.modelo,
+      _ia_uso: resultadoIA.uso || null,
     };
 
     await prisma.comparecienteAltaSession.update({
@@ -550,7 +551,8 @@ export class ComparecienteAltaSessionService {
         tipo_persona_detectado: resultadoIA.tipo_persona_detectado || 'FISICA',
         resumen_ejecutivo: resultadoIA.resumen_ejecutivo || '',
         alertas: resultadoIA.alertas || [],
-        campos: resultadoIA.campos
+        campos: resultadoIA.campos,
+        uso: resultadoIA.uso || null,
       },
       borrador_actualizado: borradorMejorado
     };
