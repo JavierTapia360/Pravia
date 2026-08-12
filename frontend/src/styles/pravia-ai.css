@@ -6,12 +6,12 @@
   right: 22px;
   bottom: 22px;
   z-index: 903;
-  min-height: 56px;
+  width: 50px;
+  min-height: 50px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
-  padding: 7px 15px 7px 8px;
+  padding: 4px;
   border: 1px solid rgb(214 180 122 / 0.75);
   border-radius: var(--radius-full);
   background: var(--pravia-navy-950);
@@ -21,8 +21,7 @@
   transition: transform var(--duration-normal) ease, box-shadow var(--duration-normal) ease, background-color var(--duration-normal) ease;
 }
 .pravia-ai-launcher:hover { transform: translateY(-2px); background: var(--pravia-navy-900); box-shadow: 0 18px 38px rgb(8 19 38 / 0.3); }
-.pravia-ai-launcher img { width: 42px; height: 42px; object-fit: cover; object-position: center 30%; border-radius: 50%; }
-.pravia-ai-launcher span { font-size: 0.75rem; font-weight: 900; letter-spacing: 0.08em; }
+.pravia-ai-launcher img { width: 40px; height: 40px; object-fit: cover; object-position: center 30%; border-radius: 50%; }
 .pravia-assistant[data-open="true"] .pravia-ai-launcher { width: 48px; min-height: 48px; right: min(470px, calc(100vw - 58px)); padding: 0; }
 
 .pravia-ai-suggestion {
@@ -103,7 +102,7 @@
 .pravia-ai-prepared button { min-height: 34px; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid var(--border-color); border-radius: 9px; background: white; color: var(--text-primary); font-size: 0.75rem; font-weight: 850; cursor: pointer; }
 .pravia-ai-prepared button:first-child { border-color: var(--color-accent); background: var(--color-accent); color: white; }
 .pravia-ai-prepared button:disabled { opacity: .55; cursor: wait; }
-.pravia-ai-actions { display: grid; gap: var(--space-2); }
+.pravia-ai-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
 .pravia-ai-actions button { min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: 0 var(--space-4); border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--pravia-white); color: var(--text-primary); font-size: 0.8125rem; font-weight: 800; cursor: pointer; }
 .pravia-ai-actions button:hover { border-color: #d6b47a; background: #fffdf9; }
 .pravia-ai-actions svg { color: var(--color-accent); }
@@ -128,7 +127,7 @@
 
 @media (max-width: 620px) {
   .pravia-ai-panel { width: 100vw; }
-  .pravia-ai-launcher { right: 14px; bottom: 14px; min-height: 52px; }
+  .pravia-ai-launcher { right: 14px; bottom: 14px; width: 48px; min-height: 48px; }
   .pravia-ai-launcher img { width: 38px; height: 38px; }
   .pravia-assistant[data-open="true"] .pravia-ai-launcher { top: 14px; right: 58px; bottom: auto; z-index: 904; background: transparent; box-shadow: none; }
   .pravia-ai-suggestion { right: 14px; bottom: 78px; }

@@ -221,7 +221,7 @@ app.use('/api/finanzas', requirePermission('finanzas.read'), finanzasRoutes);
 app.use('/api/agenda', authorizeByMethod('agenda.read', 'agenda.write'), agendaRoutes);
 app.use('/api/reportes', requirePermission('reportes.read'), reportesRoutes);
 app.use('/api/mi-dia', requirePermission('mi_dia.read'), miDiaRoutes);
-app.use('/api/ia', requirePermission('ia.read'), aiRoutes);
+app.use('/api/ia', aiRoutes);
 app.use('/api/cumplimiento', authorizeByMethod('cumplimiento.read', 'cumplimiento.write'), complianceRoutes);
 
 // 404 handler

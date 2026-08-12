@@ -214,7 +214,7 @@ export default function MainLayout() {
           <Outlet />
         </main>
       </div>
-      <PraviaAssistant />
+      {user?.permissions.includes('ai.use') && <PraviaAssistant />}
     </div>
   );
 }

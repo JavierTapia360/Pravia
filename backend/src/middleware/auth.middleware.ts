@@ -38,7 +38,7 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
 
 export const requirePermission = (permission: Permission) => (req: Request, res: Response, next: NextFunction) => {
   if (!req.user?.permissions.includes(permission)) {
-    return res.status(403).json({ code: 'PERMISSION_DENIED', error: 'No tienes permiso para realizar esta acción.', permission });
+    return res.status(403).json({ code: 'PERMISSION_DENIED', error: 'No tienes permiso para realizar esta acción.' });
   }
   return next();
 };

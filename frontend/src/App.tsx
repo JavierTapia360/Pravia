@@ -80,7 +80,7 @@ function App() {
             <Route path="prospectos" element={<PermissionRoute permission="prospectos.read"><Prospectos /></PermissionRoute>} />
             <Route path="expedientes" element={<PermissionRoute permission="expedientes.read"><Expedientes /></PermissionRoute>} />
             <Route path="expedientes/:id" element={<PermissionRoute permission="expedientes.read"><ExpedienteDetail /></PermissionRoute>} />
-            <Route path="expedientes/:expedienteId/proyecto/:versionId" element={<PermissionRoute permission="expedientes.read"><ProyectoDocumentViewerPage /></PermissionRoute>} />
+            <Route path="expedientes/:expedienteId/proyecto/:versionId" element={<PermissionRoute permission="expedientes.project.read"><ProyectoDocumentViewerPage /></PermissionRoute>} />
             <Route path="cotizaciones" element={<PermissionRoute permission="cotizaciones.read"><Cotizaciones /></PermissionRoute>} />
             <Route path="notarias" element={<PermissionRoute permission="notarias.read"><NotariasList /></PermissionRoute>} />
             {/* Feature Routes */}

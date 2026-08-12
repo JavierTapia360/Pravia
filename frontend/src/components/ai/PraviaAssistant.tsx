@@ -13,7 +13,8 @@ type OwlState = 'idle' | 'blink' | 'greeting' | 'thinking' | 'processing' | 'suc
 interface AssistantAction {
   label: string;
   to?: string;
-  response: string;
+  response?: string;
+  query?: string;
 }
 
 interface AssistantContext {
@@ -38,8 +39,10 @@ function contextFor(pathname: string): AssistantContext {
     title: 'Contexto del expediente',
     message: 'Puedo mantener este expediente como contexto para navegación y acciones asistidas. Las respuestas con datos operativos requieren una herramienta backend autorizada y siempre mostrarán su fuente.',
     actions: [
-      { label: 'Ir al resumen', to: pathname, response: 'Te mantengo en el expediente actual. El resumen operativo está en la cabecera y sus pestañas.' },
-      { label: 'Abrir Agenda', to: '/agenda', response: 'Abriré Agenda para revisar citas, firmas y vencimientos.' },
+      { label: 'Qué falta', query: '¿Qué falta en este expediente?' },
+      { label: 'Resumen', query: 'Resumen del expediente' },
+      { label: 'Documentos', query: 'Documentos del expediente' },
+      { label: 'Próximos pasos', query: 'Próximos pasos y pendientes' },
     ],
   };
   if (pathname.startsWith('/comparecientes/nuevo')) return {
@@ -52,7 +55,11 @@ function contextFor(pathname: string): AssistantContext {
     module: 'Comparecientes',
     title: 'Catálogo maestro',
     message: 'Este catálogo debe reutilizar personas existentes. Antes de crear otra, conviene buscar por nombre, RFC o CURP.',
-    actions: [{ label: 'Nuevo compareciente', to: '/comparecientes/nuevo', response: 'Abriré el flujo de alta guiada.' }],
+    actions: pathname.match(/^\/comparecientes\/[^/]+$/) ? [
+      { label: 'Qué falta', query: 'Resumen del compareciente' },
+      { label: 'Documentos', query: 'Documentos del compareciente' },
+      { label: 'Expedientes relacionados', query: 'Expedientes relacionados del compareciente' },
+    ] : [{ label: 'Nuevo compareciente', to: '/comparecientes/nuevo', response: 'Abriré el flujo de alta guiada.' }],
   };
   if (pathname.startsWith('/expedientes')) return {
     module: 'Expedientes',
@@ -70,13 +77,21 @@ function contextFor(pathname: string): AssistantContext {
     module: 'Agenda',
     title: 'Citas y vencimientos',
     message: 'Puedo ayudarte a preparar una cita o navegar a su expediente. Crear o modificar eventos requerirá confirmación explícita.',
-    actions: [{ label: 'Ver Mi Día', to: '/mi-dia', response: 'Abriré Mi Día para revisar prioridades y alertas.' }],
+    actions: [
+      { label: 'Hoy', query: 'Agenda de hoy' },
+      { label: 'Buscar espacio', query: 'Buscar espacio disponible' },
+      { label: 'Pendientes', query: 'Pendientes de hoy' },
+    ],
   };
   if (pathname.startsWith('/finanzas')) return {
     module: 'Finanzas',
     title: 'Lectura financiera',
     message: 'Los importes deben provenir del ledger y distinguir presupuesto, valor de operación, cobranza y honorarios. No afirmaré saldos sin una fuente verificable.',
-    actions: [{ label: 'Abrir Reportes', to: '/reportes', response: 'Abriré Reportes para revisar indicadores agregados.' }],
+    actions: [
+      { label: 'Por cobrar', query: 'Saldos por cobrar' },
+      { label: 'Vencidos', query: 'Saldos vencidos' },
+      { label: 'Resumen', query: 'Resumen de cobranza' },
+    ],
   };
   if (pathname.startsWith('/riesgos')) return {
     module: 'Riesgos / UIF',
@@ -124,8 +139,15 @@ function inferTool(rawQuery: string, context: GlobalAssistantContext): { tool: A
   if (expediente_id && /(cumplimiento|riesgo|uif|isr)/.test(query)) return { tool: 'getComplianceSummary', args: {} };
   if (expediente_id && /(agenda|evento|cita|firma pr[oó]xima)/.test(query)) return { tool: 'getUpcomingEvents', args: {} };
   if (expediente_id) return { tool: 'getExpedienteSummary', args: {} };
+  if (context.entity_type === 'compareciente') return { tool: 'getComparecienteSummary', args: {} };
+  if (context.module === 'agenda' && /(hoy|espacio|agenda|evento)/.test(query)) {
+    const today = new Date();
+    const from = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const to = new Date(from.getTime() + 86_400_000 - 1);
+    return { tool: /espacio/.test(query) ? 'getUpcomingEvents' : 'getAgenda', args: { from: from.toISOString(), to: to.toISOString() } };
+  }
   if (/(mi trabajo|mis tareas|qu[eé] tengo|pendientes de hoy)/.test(query)) return { tool: 'getCurrentUserWork', args: {} };
-  if (/(saldos? pendientes?|cobranza)/.test(query)) return { tool: 'getOutstandingBalances', args: {} };
+  if (/(saldos? (?:pendientes?|vencidos?|por cobrar)|cobranza|por cobrar)/.test(query)) return { tool: 'getOutstandingBalances', args: {} };
   return { tool: 'globalSearch', args: { query: rawQuery.replace(/^buscar\s+/i, '').trim() } };
 }
 
@@ -141,6 +163,7 @@ function toolResponse(result: AssistantToolResult): string {
   if (result.tool === 'getComplianceSummary') return `El expediente tiene ${data.revisiones?.length || 0} revisión(es) de cumplimiento registradas.`;
   if (result.tool === 'getCurrentUserWork') return `Tienes ${data.tareas?.length || 0} tarea(s) abierta(s) y ${data.proximos_eventos?.length || 0} evento(s) próximos.`;
   if (result.tool === 'getOutstandingBalances') return `Encontré ${Array.isArray(data) ? data.length : 0} expediente(s) con saldo pendiente dentro de tu alcance.`;
+  if (result.tool === 'getComparecienteSummary') return `${data.nombre}: ${data.documentos_activos || 0} documento(s) activo(s) y ${data.expedientes?.length || 0} expediente(s) relacionado(s).`;
   if (['prepareTask', 'prepareAppointment', 'prepareFollowUp'].includes(result.tool)) return 'Preparé el borrador. Revísalo: no se ejecutará hasta que elijas Confirmar.';
   if (result.tool === 'globalSearch') return `Resultados: ${data.expedientes?.length || 0} expediente(s), ${data.comparecientes?.length || 0} compareciente(s) y ${data.notarias?.length || 0} notaría(s).`;
   return 'Consulta completada con las fuentes autorizadas disponibles.';
@@ -162,6 +185,7 @@ export function PraviaAssistant() {
   const [suggestion, setSuggestion] = useState<PraviaSuggestion | null>(null);
   const [toolResult, setToolResult] = useState<AssistantToolResult | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [contextEntityLabel, setContextEntityLabel] = useState('');
   const context = useMemo(() => contextFor(location.pathname), [location.pathname]);
   const globalContext = useMemo(() => buildAssistantContext(location.pathname), [location.pathname]);
 
@@ -170,12 +194,14 @@ export function PraviaAssistant() {
     setToolResult(null);
     setOwlState('idle');
     setSuggestion(null);
+    setContextEntityLabel('');
     setShowSuggestion(false);
-    if (mode === 'discreet' || globalContext.entity_type !== 'expediente' || !user?.permissions.includes('expedientes.read')) return;
+    if (mode === 'discreet' || globalContext.entity_type !== 'expediente' || !user?.permissions.includes('ai.use') || !user.permissions.includes('ai.expedientes.read') || !user.permissions.includes('expedientes.read')) return;
     let active = true;
     aiService.executeTool('getExpedientePendingItems', {}, globalContext)
       .then((result) => {
         if (!active) return;
+        if (result.data?.folio) setContextEntityLabel(result.data.folio);
         const next = suggestionFromPendingItems(result.data);
         if (next && isSuggestionVisible(next, mode)) {
           setSuggestion(next);
@@ -205,10 +231,19 @@ export function PraviaAssistant() {
     setShowSuggestion(false);
     setOwlState('greeting');
     window.setTimeout(() => setOwlState('idle'), 900);
+    if (globalContext.entity_type === 'expediente' && !contextEntityLabel) {
+      aiService.executeTool('getExpedienteSummary', {}, globalContext)
+        .then((result: any) => setContextEntityLabel(result.data?.folio || ''))
+        .catch(() => undefined);
+    }
   };
 
   const runAction = (action: AssistantAction) => {
-    setResponse(action.response);
+    if (action.query) {
+      void submitQuery(action.query);
+      return;
+    }
+    setResponse(action.response || '');
     setOwlState('success');
     window.setTimeout(() => {
       setOwlState('idle');
@@ -249,8 +284,22 @@ export function PraviaAssistant() {
     setConfirming(true);
     setOwlState('processing');
     try {
-      await api.post(preparedAction.confirmation.endpoint, preparedAction.payload);
-      setResponse('Acción confirmada y registrada mediante la API normal de PRAVIA.');
+      const confirmed: any = await api.post(preparedAction.confirmation.endpoint, preparedAction.payload);
+      let confirmationAudited = true;
+      try {
+        await aiService.confirmPreparedAction({
+          tool: toolResult!.tool,
+          prepared_correlation_id: toolResult!.correlation_id,
+          target_endpoint: preparedAction.confirmation.endpoint,
+          result_entity_type: preparedAction.action === 'prepareAppointment' ? 'EventoAgenda' : 'Tarea',
+          result_entity_id: confirmed?.id,
+        });
+      } catch {
+        confirmationAudited = false;
+      }
+      setResponse(confirmationAudited
+        ? 'Acción confirmada y registrada mediante la API normal de PRAVIA.'
+        : 'La acción sí quedó registrada. Su constancia de confirmación requiere revisión técnica.');
       setToolResult(null);
       setOwlState('success');
       window.setTimeout(() => setOwlState('idle'), 900);
@@ -286,7 +335,6 @@ export function PraviaAssistant() {
         aria-controls="pravia-ai-panel"
       >
         {open ? <X size={22} /> : <img src={owlAsset('idle')} onError={fallbackImage} alt="" />}
-        {!open && <span>PRAVIA IA</span>}
       </button>
 
       <aside id="pravia-ai-panel" className="pravia-ai-panel" aria-hidden={!open} aria-label="PRAVIA IA">
@@ -305,7 +353,7 @@ export function PraviaAssistant() {
 
         <div className="pravia-ai-context">
           <Sparkles size={16} aria-hidden="true" />
-          <span><strong>{context.module}</strong> · {user?.nombre || 'Usuario'} · {user?.rol || 'Sin rol'}</span>
+          <span><strong>{contextEntityLabel ? `Expediente ${contextEntityLabel}` : context.module}</strong> · {user?.nombre || 'Usuario'} · {user?.rol || 'Sin rol'}</span>
         </div>
 
         <div className="pravia-ai-body">

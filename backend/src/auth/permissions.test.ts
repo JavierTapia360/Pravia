@@ -26,6 +26,8 @@ describe('RBAC de PRAVIA', () => {
     expect(roleHasPermission('RECEPCION', 'expedientes.postfirma.manage')).toBe(false);
     expect(roleHasPermission('RECEPCION', 'expedientes.project.read')).toBe(false);
     expect(roleHasPermission('RECEPCION', 'finanzas.write')).toBe(false);
+    expect(roleHasPermission('RECEPCION', 'ai.expedientes.read')).toBe(true);
+    expect(roleHasPermission('RECEPCION', 'ai.finanzas.read')).toBe(false);
   });
 
   it('mantiene Consulta en solo lectura', () => {
