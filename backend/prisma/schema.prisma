@@ -73,6 +73,8 @@ model User {
   requisitoVinculosCreados     RequisitoDocumentoVinculo[] @relation("RequisitoDocCreador")
   movimientoVinculosCreados    MovimientoDocumento[]       @relation("MovimientoDocCreador")
   comunicacionVinculosCreados  ComunicacionDocumento[]     @relation("ComunicacionDocCreador")
+  entregasRegistradas          ExpedienteEntrega[]         @relation("ExpedienteEntregaRegistrador")
+  tramitesPostfirmaGestionados TareaExterna[]              @relation("TareaExternaGestor")
 
   comparecientesCreados                  Compareciente[]               @relation("ComparecienteCreador")
   instrumentosMoralCreados               PersonaMoralInstrumento[]     @relation("InstrumentoCreador")
@@ -620,6 +622,7 @@ model Expediente {
   eventos                    EventoAgenda[]
   aiUsageLogs                AIUsageLog[]
   complianceReviews          ComplianceReview[]
+  entrega                    ExpedienteEntrega?
 
   @@map("expedientes")
 }
@@ -739,6 +742,8 @@ model Documento {
   movimientoVinculos    MovimientoDocumento[]
   comunicacionVinculos  ComunicacionDocumento[]
   complianceEvidence    ComplianceEvidence[]
+  entregasEvidencia     ExpedienteEntrega[]         @relation("ExpedienteEntregaEvidencia")
+  tramitesEvidencia     TareaExterna[]              @relation("TareaExternaEvidencia")
 
   instrumentosMoralSoporte PersonaMoralInstrumento[]
   identificacionesSoporte  ComparecienteIdentificacion[]
@@ -1734,21 +1739,52 @@ enum TipoEvento {
 }
 
 model TareaExterna {
-  id               String              @id @default(uuid()) @db.Uuid
-  expediente_id    String              @db.Uuid
-  tipo             TipoTareaExterna
-  descripcion      String
-  institucion      String?
-  estatus          TareaExternaEstatus @default(PENDIENTE)
-  fecha_inicio     DateTime?
-  fecha_limite     DateTime?
-  fecha_completada DateTime?
-  notas            String?
-  created_at       DateTime            @default(now())
+  id                     String              @id @default(uuid()) @db.Uuid
+  expediente_id          String              @db.Uuid
+  tipo                   TipoTareaExterna
+  descripcion            String
+  institucion            String?
+  estatus                TareaExternaEstatus @default(PENDIENTE)
+  fecha_inicio           DateTime?
+  fecha_limite           DateTime?
+  fecha_completada       DateTime?
+  notas                  String?
+  folio                  String?
+  fecha_ingreso          DateTime?
+  seguimiento            String?
+  prevencion             String?
+  subsanacion            String?
+  resultado              String?
+  evidencia_documento_id String?             @db.Uuid
+  gestionado_por_id      String?             @db.Uuid
+  created_at             DateTime            @default(now())
+  updated_at             DateTime            @updatedAt
 
-  expediente Expediente @relation(fields: [expediente_id], references: [id], onDelete: Restrict)
+  expediente     Expediente @relation(fields: [expediente_id], references: [id], onDelete: Restrict)
+  gestionado_por User?      @relation("TareaExternaGestor", fields: [gestionado_por_id], references: [id], onDelete: SetNull)
+  evidencia      Documento? @relation("TareaExternaEvidencia", fields: [evidencia_documento_id], references: [id], onDelete: SetNull)
 
   @@map("tareas_externas")
+}
+
+model ExpedienteEntrega {
+  id                     String   @id @default(uuid()) @db.Uuid
+  expediente_id          String   @unique @db.Uuid
+  receptor_nombre        String
+  receptor_caracter      String
+  fecha_efectiva         DateTime
+  medio                  String
+  items                  Json
+  evidencia_documento_id String   @db.Uuid
+  observaciones          String?
+  registrado_por_id      String   @db.Uuid
+  created_at             DateTime @default(now())
+
+  expediente     Expediente @relation(fields: [expediente_id], references: [id], onDelete: Restrict)
+  evidencia      Documento  @relation("ExpedienteEntregaEvidencia", fields: [evidencia_documento_id], references: [id], onDelete: Restrict)
+  registrado_por User       @relation("ExpedienteEntregaRegistrador", fields: [registrado_por_id], references: [id], onDelete: Restrict)
+
+  @@map("expediente_entregas")
 }
 
 enum TipoTareaExterna {

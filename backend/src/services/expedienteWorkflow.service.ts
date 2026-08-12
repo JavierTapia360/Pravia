@@ -1,6 +1,12 @@
 import { PrismaClient, ExpedienteEstatus, Role, Prisma } from '@prisma/client';
 import { ExpedienteProgressService } from './expedienteProgress.service';
 import { assertExpedienteTransition, ExpedienteWorkflowError } from '../domain/expedienteWorkflow';
+import {
+  assertPostfirmaReadyForDelivery,
+  assertSpecializedTransition,
+  DeliveryInput,
+  validateDeliveryInput,
+} from '../domain/expedienteAuthorization';
 
 export interface TransicionPayload {
   expedienteId: string;
@@ -16,6 +22,7 @@ export interface TransicionPayload {
     lugar: string;
     autorizaSaldoPendiente?: boolean;
   };
+  entrega?: DeliveryInput;
 }
 
 export interface ReabrirPayload {
@@ -57,6 +64,8 @@ export class ExpedienteWorkflowService {
           comparecientes: { include: { compareciente: true } },
           cotizacion: true,
           flujoVersion: true,
+          expedienteDocumentos: { where: { estatus: 'ACTIVO' }, select: { documento_id: true } },
+          tareas_externas: { select: { estatus: true } },
         }
       });
 
@@ -72,7 +81,7 @@ export class ExpedienteWorkflowService {
       }
 
       // 4. Validar matriz de permisos por rol autenticado
-      this.validarPermisosRol(actorUser.rol, exp.estatus, payload.nuevoEstatus);
+      assertSpecializedTransition(actorUser.rol, exp.estatus, payload.nuevoEstatus);
 
       // 5. Validar exclusivamente contra la versión congelada del flujo.
       let flujoEtapaSnapshot: any = null;
@@ -127,11 +136,21 @@ export class ExpedienteWorkflowService {
       if (payload.nuevoEstatus === 'FIRMA_PROGRAMADA') {
         this.validarRequisitosFirma(exp, payload.datosFirma);
       }
-      if (payload.nuevoEstatus === 'ENTREGADO' && !payload.observaciones?.trim()) {
-        throw new ExpedienteWorkflowError(
-          'Registra en observaciones a quién se entregó y la evidencia disponible.',
-          'EXPEDIENTE_DELIVERY_EVIDENCE_REQUIRED',
+      if (payload.nuevoEstatus === 'LISTO_ENTREGA') {
+        assertPostfirmaReadyForDelivery(
+          exp.tareas_externas,
+          exp.requisitos_docs.map((item) => ({
+            obligatorio: item.obligatorio,
+            validado: item.estatus === 'VALIDADO',
+            omitido: item.estatus === 'OMITIDO_JUSTIFICADO',
+          })),
         );
+      }
+      if (payload.nuevoEstatus === 'ENTREGADO') {
+        if (!payload.entrega) {
+          throw new ExpedienteWorkflowError('Registra la entrega desde la acción de entrega final.', 'EXPEDIENTE_DELIVERY_DATA_REQUIRED');
+        }
+        validateDeliveryInput(payload.entrega, new Set(exp.expedienteDocumentos.map((item) => item.documento_id)));
       }
       if (payload.nuevoEstatus && ['FIRMADO', 'ENTREGADO'].includes(payload.nuevoEstatus) && !payload.fechaEfectiva) {
         throw new ExpedienteWorkflowError(
@@ -238,6 +257,22 @@ export class ExpedienteWorkflowService {
 
       if (updateResult.count === 0) {
         throw new Error(`[409 CONFLICT] El expediente ha sido modificado por otro usuario (Versión esperada: ${payload.versionActual}). Por favor recargue.`);
+      }
+
+      if (payload.nuevoEstatus === 'ENTREGADO' && payload.entrega) {
+        await tx.expedienteEntrega.create({
+          data: {
+            expediente_id: exp.id,
+            receptor_nombre: payload.entrega.receptor_nombre.trim(),
+            receptor_caracter: payload.entrega.receptor_caracter.trim(),
+            fecha_efectiva: payload.entrega.fecha_efectiva,
+            medio: payload.entrega.medio.trim(),
+            items: payload.entrega.items as unknown as Prisma.InputJsonValue,
+            evidencia_documento_id: payload.entrega.evidencia_documento_id,
+            observaciones: payload.entrega.observaciones?.trim() || null,
+            registrado_por_id: actorUser.id,
+          },
+        });
       }
 
       // 9. Calcular avances con el estado EFECTIVO post-transición dentro de la transacción
@@ -390,24 +425,6 @@ export class ExpedienteWorkflowService {
 
       return expActualizado;
     });
-  }
-
-  private validarPermisosRol(rol: Role, estatusActual: ExpedienteEstatus, nuevoEstatus?: ExpedienteEstatus) {
-    if (!nuevoEstatus || estatusActual === nuevoEstatus) return;
-
-    if (rol === 'RECEPCION') {
-      // Recepción únicamente puede realizar entrega final
-      if (estatusActual !== 'LISTO_ENTREGA' || nuevoEstatus !== 'ENTREGADO') {
-        throw new Error('El rol RECEPCION únicamente tiene autorización para registrar entregas finales');
-      }
-    }
-
-    if (rol === 'GESTORIA') {
-      const permitidos: ExpedienteEstatus[] = ['FIRMADO', 'POST_FIRMA', 'LISTO_ENTREGA'];
-      if (!permitidos.includes(nuevoEstatus)) {
-        throw new Error(`El rol GESTORIA no tiene permisos para transicionar al estado '${nuevoEstatus}'`);
-      }
-    }
   }
 
   private validarRequisitosFirma(exp: any, datosFirma?: any) {

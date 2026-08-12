@@ -22,7 +22,7 @@ import complianceRoutes from './routes/compliance.routes';
 import authRoutes from './routes/auth.routes';
 import usersRoutes from './routes/users.routes';
 import storageRoutes from './routes/storage.routes';
-import { authenticate, authorizeByMethod, requirePasswordReady, requirePermission } from './middleware/auth.middleware';
+import { authenticate, authorizeByMethod, authorizeExpedienteRequest, requirePasswordReady, requirePermission } from './middleware/auth.middleware';
 import { errorLogLevel, normalizeErrorBody } from './utils/httpError';
 import { getStorageCompensationHealth, storageCompensationWorker } from './workers/storageCompensation.worker';
 
@@ -213,7 +213,7 @@ app.use('/api/prospectos', authorizeByMethod('prospectos.read', 'prospectos.writ
 app.use('/api/documentos', authorizeByMethod('documentos.read', 'documentos.write'), documentosRoutes);
 app.use('/api/notarias', authorizeByMethod('notarias.read', 'notarias.write'), notariasRoutes);
 app.use('/api/cotizaciones', authorizeByMethod('cotizaciones.read', 'cotizaciones.write'), cotizacionesRoutes);
-app.use('/api/expedientes', authorizeByMethod('expedientes.read', 'expedientes.write'), expedientesRoutes);
+app.use('/api/expedientes', authorizeExpedienteRequest, expedientesRoutes);
 app.use('/api/comparecientes/altas', authorizeByMethod('comparecientes.read', 'comparecientes.write'), comparecienteAltaSessionRoutes);
 app.use('/api/comparecientes/alta', authorizeByMethod('comparecientes.read', 'comparecientes.write'), comparecienteAltaSessionRoutes);
 app.use('/api/comparecientes', authorizeByMethod('comparecientes.read', 'comparecientes.write'), comparecientesRoutes);
