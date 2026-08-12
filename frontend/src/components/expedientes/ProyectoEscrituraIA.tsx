@@ -4,6 +4,8 @@ import {
   FileText, Sparkles, Upload, Eye, Download, AlertTriangle, Cpu, X, Check, Edit3, 
   CheckCircle2, Loader2, Clock, AlertCircle, ArrowRight, RotateCcw, FileCheck
 } from 'lucide-react';
+import { api } from '../../services/api';
+import { useToastStore } from '../../stores/toastStore';
 
 interface ProyectoVersion {
   id: string;
@@ -55,6 +57,7 @@ const STAGES = [
 
 export const ProyectoEscrituraIA: React.FC<Props> = ({ expedienteId }) => {
   const navigate = useNavigate();
+  const { addToast } = useToastStore();
   const [versiones, setVersiones] = useState<ProyectoVersion[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   
@@ -120,16 +123,13 @@ export const ProyectoEscrituraIA: React.FC<Props> = ({ expedienteId }) => {
   const fetchProyectoData = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/expedientes/${expedienteId}/proyecto`);
-      if (res.ok) {
-        const data = await res.json();
-        const list: ProyectoVersion[] = [];
-        if (data.vigente) list.push(data.vigente);
-        if (data.historial && Array.isArray(data.historial)) {
-          list.push(...data.historial.filter((h: any) => h.id !== data.vigente?.id));
-        }
-        setVersiones(list);
+      const data = await api.get(`/expedientes/${expedienteId}/proyecto`);
+      const list: ProyectoVersion[] = [];
+      if (data.vigente) list.push(data.vigente);
+      if (data.historial && Array.isArray(data.historial)) {
+        list.push(...data.historial.filter((h: any) => h.id !== data.vigente?.id));
       }
+      setVersiones(list);
     } catch (e) {
       console.error('Error al cargar versiones del proyecto:', e);
     } finally {
@@ -141,11 +141,8 @@ export const ProyectoEscrituraIA: React.FC<Props> = ({ expedienteId }) => {
     setShowMatrixModal(true);
     setMatrixLoading(true);
     try {
-      const res = await fetch(`/api/expedientes/${expedienteId}/proyecto/matriz-datos`);
-      if (res.ok) {
-        const data = await res.json();
-        setMatrixData(data.matriz || []);
-      }
+      const data = await api.get(`/expedientes/${expedienteId}/proyecto/matriz-datos`);
+      setMatrixData(data.matriz || []);
     } catch (e) {
       console.error('Error al cargar matriz de datos:', e);
     } finally {
@@ -196,16 +193,10 @@ export const ProyectoEscrituraIA: React.FC<Props> = ({ expedienteId }) => {
 
     try {
       // 3. Real Backend API Call
-      const res = await fetch(`/api/expedientes/${expedienteId}/proyecto/generar-ia`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ matriz_confirmada: matrixData })
-      });
-
+      const resData = await api.post(`/expedientes/${expedienteId}/proyecto/generar-ia`, { matriz_confirmada: matrixData });
       clearInterval(stageInterval);
-      const resData = await res.json().catch(() => ({}));
 
-      if (!res.ok || (!resData.version && !resData.success)) {
+      if (!resData.version && !resData.success) {
         const errorMsg = resData.error || resData.detail || 'Faltan datos obligatorios o la plantilla notarial presenta fallas.';
         const failedState: ActiveGenState = {
           expedienteId,
@@ -277,21 +268,23 @@ export const ProyectoEscrituraIA: React.FC<Props> = ({ expedienteId }) => {
     formData.append('nota_version', 'Carga manual realizada por el abogado');
 
     try {
-      const res = await fetch(`/api/expedientes/${expedienteId}/proyecto/upload`, {
-        method: 'POST',
-        body: formData
-      });
-
-      if (res.ok) {
-        await fetchProyectoData();
-      } else {
-        alert('Error al subir la nueva versión del proyecto');
-      }
+      await api.upload(`/expedientes/${expedienteId}/proyecto/upload`, formData);
+      await fetchProyectoData();
     } catch (err) {
-      alert('Error al conectar con el servidor');
+      addToast('No fue posible conectar con el servidor.', 'error');
     } finally {
       setUploadingManual(false);
     }
+  };
+
+  const downloadVersion = async (version: ProyectoVersion | any) => {
+    const blob = await api.blob(`/expedientes/${expedienteId}/proyecto/versions/${version.id}/descargar`);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = version.nombre_original || `proyecto-v${version.version_numero || ''}.docx`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   };
 
   const missingRequired = matrixData.filter(m => m.obligatorio && (!m.valor_detectado || m.valor_detectado.includes('PENDIENTE') || m.estatus === 'PENDIENTE'));
@@ -383,8 +376,8 @@ export const ProyectoEscrituraIA: React.FC<Props> = ({ expedienteId }) => {
             <button
               type="button"
               onClick={async () => {
-                const res = await fetch(`/api/expedientes/${expedienteId}/proyecto/analizar-ia`, { method: 'POST' });
-                if (res.ok) alert('Reporte de observaciones jurídicas generado con éxito');
+                await api.post(`/expedientes/${expedienteId}/proyecto/analizar-ia`, {});
+                addToast('Reporte de observaciones jurídicas generado con éxito.', 'success');
               }}
               className="flex items-center gap-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 text-xs font-bold px-3.5 py-2.5 rounded-xl transition-all"
             >
@@ -443,14 +436,14 @@ export const ProyectoEscrituraIA: React.FC<Props> = ({ expedienteId }) => {
                     Visualizar en PRAVIA OS
                   </button>
 
-                  <a
-                    href={`/api/expedientes/${expedienteId}/proyecto/versions/${v.id}/descargar`}
-                    download
+                  <button
+                    type="button"
+                    onClick={() => void downloadVersion(v)}
                     className="flex items-center gap-1.5 bg-gold/10 hover:bg-gold/20 text-gold text-xs font-semibold px-3.5 py-2 rounded-xl border border-gold/30 transition-all"
                   >
                     <Download size={15} />
                     Descargar .docx
-                  </a>
+                  </button>
                 </div>
               </div>
             ))}
@@ -707,15 +700,17 @@ export const ProyectoEscrituraIA: React.FC<Props> = ({ expedienteId }) => {
                     <span>Visualizar Proyecto en PRAVIA OS</span>
                   </button>
 
-                  <a
-                    href={`/api/expedientes/${expedienteId}/proyecto/versions/${genProgress.completedVersion.id}/descargar`}
-                    download
-                    onClick={handleCloseProgressModal}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void downloadVersion(genProgress.completedVersion);
+                      handleCloseProgressModal();
+                    }}
                     className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 border border-white/20"
                   >
                     <Download size={16} className="text-emerald-400" />
                     <span>Descargar Archivo .docx</span>
-                  </a>
+                  </button>
                 </div>
 
                 <div className="flex justify-end border-t border-white/10 pt-4">

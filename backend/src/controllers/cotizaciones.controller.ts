@@ -9,13 +9,14 @@ import {
   validateCotizacionTransition,
 } from '../domain/cotizacionWorkflow';
 import { CotizacionConversionService } from '../services/cotizacionConversion.service';
+import { canAccessCotizacion, canAccessDocumento, canAccessProspecto, cotizacionObjectWhere } from '../services/objectAccess.service';
 
 const cotizacionConversionService = new CotizacionConversionService(prisma);
 
 export const getCotizaciones = async (req: Request, res: Response) => {
   try {
     const { estado } = req.query;
-    const where: any = {};
+    const where: any = req.user ? cotizacionObjectWhere(req.user) : {};
     if (estado) {
       where.estado = estado as string;
     }
@@ -78,17 +79,17 @@ export const getCotizacionById = async (req: Request, res: Response) => {
 
 export const createCotizacion = async (req: Request, res: Response) => {
   try {
-    const { prospecto_id, user_id, notaria_id } = req.body;
+    const { prospecto_id, notaria_id } = req.body;
 
     if (!prospecto_id) {
       return res.status(400).json({ error: 'prospecto_id es requerido' });
     }
 
-    const actor = user_id
-      ? await prisma.user.findFirst({ where: { id: user_id, activo: true } })
-      : await prisma.user.findFirst({ where: { activo: true }, orderBy: { created_at: 'asc' } });
-    const userId = actor?.id;
-    if (!userId) return res.status(400).json({ error: 'Usuario no encontrado' });
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
+    if (!(await canAccessProspecto(req.user!, String(prospecto_id)))) {
+      return res.status(403).json({ error: 'No tienes acceso al prospecto seleccionado.', code: 'PROSPECTO_ACCESS_DENIED' });
+    }
 
     // Get prospecto info for email generation
     const prospecto = await prisma.prospecto.findUnique({
@@ -186,7 +187,9 @@ PRAVIA`;
 export const updateCotizacionEstado = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { estado, user_id } = req.body;
+    const { estado } = req.body;
+    const actorUserId = req.user?.id;
+    if (!actorUserId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     if (!Object.values(CotizacionEstado).includes(estado as CotizacionEstado)) {
       return res.status(400).json({ error: 'Estado de cotización inválido.', code: 'INVALID_COTIZACION_STATE' });
@@ -230,8 +233,7 @@ export const updateCotizacionEstado = async (req: Request, res: Response) => {
     });
 
     if (result.changed) {
-      const userId = user_id || result.cotizacion.user_id;
-      await logAudit(userId, 'UPDATE_ESTADO', 'Cotizacion', id, { nuevo_estado: estado });
+      await logAudit(actorUserId, 'UPDATE_ESTADO', 'Cotizacion', id, { nuevo_estado: estado });
     }
 
     res.json({
@@ -254,10 +256,11 @@ export const createCotizacionVersion = async (req: Request, res: Response) => {
       desglose_pravia,
       total_notaria,
       honorarios_pravia,
-      user_id,
       notas,
       aprobada
     } = req.body;
+    const actorUserId = req.user?.id;
+    if (!actorUserId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     // Total cliente equals total notaria (PRAVIA participation is an internal split, NOT an additive fee)
     const totalNotariaVal = Number(total_notaria || 0);
@@ -286,7 +289,7 @@ export const createCotizacionVersion = async (req: Request, res: Response) => {
         select: { version: true },
       });
       const newVersionNum = latestVersion ? latestVersion.version + 1 : 1;
-      const userId = user_id || cotizacion.user_id;
+      const userId = actorUserId;
 
       if (aprobada) {
         await tx.cotizacionVersion.updateMany({
@@ -354,10 +357,14 @@ Equipo PRAVIA OS`,
 export const aprobarVersion = async (req: Request, res: Response) => {
   try {
     const { versionId } = req.params;
-    const { user_id } = req.body;
+    const actorUserId = req.user?.id;
+    if (!actorUserId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     const target = await prisma.cotizacionVersion.findUnique({ where: { id: versionId } });
     if (!target) return res.status(404).json({ error: 'Versión de cotización no encontrada.' });
+    if (!(await canAccessCotizacion(req.user!, target.cotizacion_id))) {
+      return res.status(403).json({ error: 'No tienes acceso a esta cotización.', code: 'COTIZACION_ACCESS_DENIED' });
+    }
 
     const result = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion-version:${target.cotizacion_id}`}))`);
@@ -387,8 +394,7 @@ export const aprobarVersion = async (req: Request, res: Response) => {
       return { version: approvedVersion, cotizacion };
     });
 
-    const userId = user_id || result.version.creada_por_id || result.cotizacion.user_id;
-    await logAudit(userId, 'APPROVE_VERSION', 'CotizacionVersion', versionId, { version: result.version.version });
+    await logAudit(actorUserId, 'APPROVE_VERSION', 'CotizacionVersion', versionId, { version: result.version.version });
 
     res.json(result.version);
   } catch (error: any) {
@@ -411,8 +417,14 @@ export const extractPresupuesto = async (req: Request, res: Response) => {
 
       let doc = null;
       if (documentoId) {
+        if (!req.user || !(await canAccessDocumento(req.user, String(documentoId)))) {
+          return res.status(403).json({ error: 'No tienes acceso al documento solicitado.', code: 'DOCUMENTO_ACCESS_DENIED' });
+        }
         doc = await prisma.documento.findUnique({ where: { id: documentoId } });
       } else if (cotizacionId) {
+        if (!req.user || !(await canAccessCotizacion(req.user, String(cotizacionId)))) {
+          return res.status(403).json({ error: 'No tienes acceso a esta cotización.', code: 'COTIZACION_ACCESS_DENIED' });
+        }
         doc = await prisma.documento.findFirst({
           where: {
             cotizacion_id: cotizacionId,
@@ -450,7 +462,9 @@ export const extractPresupuesto = async (req: Request, res: Response) => {
 export const registrarAnticipo = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { monto, fecha, comprobante_url, notas, user_id } = req.body;
+    const { monto, fecha, comprobante_url, notas } = req.body;
+    const actorUserId = req.user?.id;
+    if (!actorUserId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     if (!monto || Number(monto) <= 0) {
       return res.status(400).json({ error: 'El monto del anticipo debe ser mayor a 0.' });
@@ -481,10 +495,7 @@ export const registrarAnticipo = async (req: Request, res: Response) => {
       }
     });
 
-    const userId = user_id || (await prisma.user.findFirst())?.id;
-    if (userId) {
-      await logAudit(userId, 'REGISTRAR_ANTICIPO', 'Pago', pago.id, { monto });
-    }
+    await logAudit(actorUserId, 'REGISTRAR_ANTICIPO', 'Pago', pago.id, { monto });
 
     res.status(201).json(pago);
   } catch (error: any) {
@@ -495,32 +506,28 @@ export const registrarAnticipo = async (req: Request, res: Response) => {
 export const validarAnticipo = async (req: Request, res: Response) => {
   try {
     const { pagoId } = req.params;
-    const { user_id } = req.body;
+    const actor = req.user;
+    if (!actor) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     const pagoActual = await prisma.pago.findUnique({ where: { id: pagoId } });
     if (!pagoActual || !pagoActual.cotizacion_id || pagoActual.categoria_ingreso !== 'ANTICIPO_NOTARIA') {
       return res.status(404).json({ error: 'Anticipo de cotización no encontrado.' });
+    }
+    if (!(await canAccessCotizacion(actor, pagoActual.cotizacion_id))) {
+      return res.status(403).json({ error: 'No tienes acceso a esta cotización.', code: 'COTIZACION_ACCESS_DENIED' });
     }
     if (pagoActual.estatus === 'VALIDADO') return res.json(pagoActual);
     if (!['PENDIENTE', 'RECIBIDO'].includes(pagoActual.estatus)) {
       return res.status(409).json({ error: `No se puede validar un anticipo en estado ${pagoActual.estatus}.` });
     }
 
-    const validator = user_id
-      ? await prisma.user.findFirst({
-          where: { id: user_id, activo: true, rol: { in: ['DIRECCION', 'ADMINISTRACION'] } },
-        })
-      : await prisma.user.findFirst({
-          where: { activo: true, rol: { in: ['DIRECCION', 'ADMINISTRACION'] } },
-          orderBy: { created_at: 'asc' },
-        });
-    if (!validator) {
+    if (!['DIRECCION', 'ADMINISTRACION'].includes(actor.rol)) {
       return res.status(403).json({
         error: 'La validación del anticipo requiere un usuario activo de Dirección o Administración.',
         code: 'ADVANCE_VALIDATION_FORBIDDEN',
       });
     }
-    const userId = validator.id;
+    const userId = actor.id;
 
     const pago = await prisma.pago.update({
       where: { id: pagoId },
@@ -544,10 +551,13 @@ export const validarAnticipo = async (req: Request, res: Response) => {
 export const convertToExpediente = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { user_id, tipo_acto_id, abogado_id } = req.body;
+    const { tipo_acto_id, abogado_id } = req.body;
+    if (!req.user || !(await canAccessCotizacion(req.user, id))) {
+      return res.status(403).json({ error: 'No tienes acceso a esta cotización.', code: 'COTIZACION_ACCESS_DENIED' });
+    }
     const result = await cotizacionConversionService.convert({
       cotizacionId: id,
-      actorUserId: (req as any).user?.id || user_id,
+      actorUserId: req.user?.id,
       tipoActoId: tipo_acto_id,
       abogadoId: abogado_id,
       correlationId: (req as any).correlationId,
@@ -583,13 +593,13 @@ export const getCotizacionSeguimientos = async (req: Request, res: Response) => 
 export const createCotizacionSeguimiento = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { tipo, destinatario, resumen, resultado, proxima_accion, responsable, fecha_proximo_seguimiento, user_id } = req.body;
+    const { tipo, destinatario, resumen, resultado, proxima_accion, responsable, fecha_proximo_seguimiento } = req.body;
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     if (!resumen) {
       return res.status(400).json({ error: 'El resumen del seguimiento es obligatorio.' });
     }
-
-    const userId = user_id || (await prisma.user.findFirst())?.id;
 
     const seguimiento = await prisma.cotizacionSeguimiento.create({
       data: {
@@ -621,7 +631,9 @@ export const createCotizacionSeguimiento = async (req: Request, res: Response) =
 export const updateParticipacionPravia = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { monto, user_id } = req.body;
+    const { monto } = req.body;
+    const actorUserId = req.user?.id;
+    if (!actorUserId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     const cotizacion = await prisma.cotizacion.findUnique({
       where: { id },
@@ -650,10 +662,7 @@ export const updateParticipacionPravia = async (req: Request, res: Response) => 
       });
     }
 
-    const userId = user_id || cotizacion.user_id;
-    if (userId) {
-      await logAudit(userId, 'UPDATE_PRAVIA_PARTICIPATION', 'Cotizacion', id, { monto: praviaMontoVal });
-    }
+    await logAudit(actorUserId, 'UPDATE_PRAVIA_PARTICIPATION', 'Cotizacion', id, { monto: praviaMontoVal });
 
     res.json(updatedCotizacion);
   } catch (error: any) {
@@ -736,7 +745,7 @@ export const unlinkCotizacionDocumento = async (req: Request, res: Response) => 
     // Desvincular de tabla junction CotizacionDocumento
     await prisma.cotizacionDocumento.updateMany({
       where: { cotizacion_id: id, documento_id: documentoId },
-      data: { estatus: 'INACTIVO', inactivado_at: new Date() }
+      data: { estatus: 'INACTIVO', inactivado_at: new Date(), inactivado_por_id: req.user?.id }
     });
 
     // Desvincular cotizacion_id directo si existe

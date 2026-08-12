@@ -34,6 +34,7 @@ export function ExpedienteWorkflowPanel({ expediente, actorUserId, onUpdated }: 
   const [notes, setNotes] = useState('');
   const [signatureDate, setSignatureDate] = useState('');
   const [signaturePlace, setSignaturePlace] = useState('');
+  const [effectiveDate, setEffectiveDate] = useState('');
   const [authorizePendingBalance, setAuthorizePendingBalance] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -42,6 +43,7 @@ export function ExpedienteWorkflowPanel({ expediente, actorUserId, onUpdated }: 
     setNotes('');
     setSignatureDate('');
     setSignaturePlace('');
+    setEffectiveDate('');
     setAuthorizePendingBalance(false);
   }, [expediente.id, expediente.version]);
 
@@ -62,7 +64,6 @@ export function ExpedienteWorkflowPanel({ expediente, actorUserId, onUpdated }: 
     try {
       await api.post(`/expedientes/${expediente.id}/transicion-estatus`, {
         expected_version: expediente.version,
-        user_id: actorUserId,
         ...payload,
       });
       await onUpdated();
@@ -84,10 +85,15 @@ export function ExpedienteWorkflowPanel({ expediente, actorUserId, onUpdated }: 
       addToast('Agrega las observaciones requeridas para esta transición.', 'error');
       return;
     }
+    if (selectedTransition.requires_effective_date && !effectiveDate) {
+      addToast('Indica la fecha y hora efectiva del hecho concluido.', 'error');
+      return;
+    }
     await execute({
       nuevo_estatus: selectedTransition.status,
       nueva_etapa_clave: selectedTransition.stage?.clave || undefined,
       notas: notes.trim() || undefined,
+      fecha_efectiva: selectedTransition.requires_effective_date ? new Date(effectiveDate).toISOString() : undefined,
       datos_firma: selectedTransition.requires_signature_data
         ? {
             fecha_firma: new Date(signatureDate).toISOString(),
@@ -188,6 +194,20 @@ export function ExpedienteWorkflowPanel({ expediente, actorUserId, onUpdated }: 
                   Registrar autorización operativa si existe saldo pendiente. Esto no modifica ni liquida movimientos financieros.
                 </label>
               </div>
+            )}
+
+            {selectedTransition?.requires_effective_date && (
+              <label className="block rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-slate-800">
+                Fecha y hora efectiva de {selectedTransition.status === 'FIRMADO' ? 'la firma' : 'la entrega'} *
+                <input
+                  type="datetime-local"
+                  value={effectiveDate}
+                  max={new Date().toISOString().slice(0, 16)}
+                  onChange={(event) => setEffectiveDate(event.target.value)}
+                  className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-800"
+                />
+                <span className="mt-1 block text-xs font-normal text-slate-600">Se conserva por separado de la fecha en que registras el cambio.</span>
+              </label>
             )}
 
             <div>

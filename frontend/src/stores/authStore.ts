@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { authService, type AuthUser } from '../services/auth.service';
 import { configureRefreshHandler, setAccessToken } from '../services/authToken';
+import { invalidatePrivateRequests } from '../services/api';
+import { clearPrivateState } from './privateState';
 
 type AuthStatus = 'checking' | 'authenticated' | 'anonymous';
 
@@ -30,6 +32,8 @@ export const useAuthStore = create<AuthState>((set, get) => {
       return payload.access_token;
     } catch {
       setAccessToken(null);
+      invalidatePrivateRequests();
+      clearPrivateState();
       set({ status: 'anonymous', user: null });
       return null;
     }
@@ -41,13 +45,20 @@ export const useAuthStore = create<AuthState>((set, get) => {
     initialize: async () => {
       if (!initialization) initialization = authService.refresh()
         .then((payload) => { acceptSession(payload); })
-        .catch(() => { setAccessToken(null); set({ status: 'anonymous', user: null }); });
+        .catch(() => {
+          setAccessToken(null);
+          invalidatePrivateRequests();
+          clearPrivateState();
+          set({ status: 'anonymous', user: null });
+        });
       await initialization;
     },
     login: async (email, password) => acceptSession(await authService.login(email, password)),
     logout: async () => {
       await authService.logout();
       setAccessToken(null);
+      invalidatePrivateRequests();
+      clearPrivateState();
       set({ status: 'anonymous', user: null });
     },
     markPasswordChanged: async () => {

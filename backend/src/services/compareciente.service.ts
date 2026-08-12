@@ -90,13 +90,15 @@ export class ComparecienteService {
     search?: string;
     page?: number;
     limit?: number;
+    accessWhere?: Record<string, unknown>;
   }) {
     const page = params.page || 1;
     const limit = params.limit || 25;
     const skip = (page - 1) * limit;
 
     const whereClause: any = {
-      archived_at: null
+      archived_at: null,
+      ...(params.accessWhere && Object.keys(params.accessWhere).length ? { AND: [params.accessWhere] } : {}),
     };
 
     if (params.tipo_persona) {

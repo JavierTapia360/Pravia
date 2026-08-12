@@ -194,36 +194,36 @@ export default function Agenda() {
       : anchor.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
   const renderEvent = (event: AgendaEvent) => (
-    <button key={event.id} type="button" onClick={() => openEdit(event)} className="w-full text-left rounded-lg border px-2.5 py-2 hover:shadow-sm transition bg-white" style={{ borderLeftWidth: 4, borderLeftColor: event.color }}>
-      <span className="block text-xs font-bold text-slate-900 truncate">{event.titulo}</span>
-      <span className="block text-[10px] text-slate-500 truncate">{event.todo_el_dia ? 'Todo el día' : new Date(event.fecha_inicio).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })} · {EVENT_LABELS[event.tipo]}</span>
+    <button key={event.id} type="button" onClick={() => openEdit(event)} className="w-full text-left rounded-lg border bg-white px-3 py-2.5 transition hover:shadow-sm" style={{ borderLeftWidth: 4, borderLeftColor: event.color }}>
+      <span className="block truncate text-sm font-bold text-slate-900">{event.titulo}</span>
+      <span className="mt-0.5 block truncate text-xs text-slate-500">{event.todo_el_dia ? 'Todo el día' : new Date(event.fecha_inicio).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })} · {EVENT_LABELS[event.tipo]}</span>
     </button>
   );
 
   return (
-    <div className="max-w-[1500px] mx-auto p-4 md:p-7 space-y-5">
-      <header className="flex flex-col xl:flex-row xl:items-end justify-between gap-4 border-b border-slate-200 pb-5">
+    <div className="module-page agenda-page">
+      <header className="module-page-header">
         <div>
           <span className="text-xs font-bold uppercase tracking-wider text-amber-700">Operación diaria</span>
-          <h1 className="text-3xl font-black text-slate-950 flex items-center gap-3"><CalendarDays className="text-amber-600" /> Agenda</h1>
-          <p className="text-sm text-slate-500 mt-1">Firmas, citas, vencimientos y seguimientos vinculados al expediente.</p>
+          <h1 className="module-title flex items-center gap-3"><CalendarDays className="text-amber-700" /> Agenda</h1>
+          <p className="module-description">Firmas, citas, vencimientos y seguimientos vinculados al expediente.</p>
         </div>
-        <button type="button" onClick={() => openCreate(new Date())} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-950 text-white text-sm font-bold hover:bg-slate-800"><Plus size={17} /> Nuevo evento</button>
+        <button type="button" onClick={() => openCreate(new Date())} className="btn btn-primary btn-lg"><Plus size={17} /> Nuevo evento</button>
       </header>
 
-      <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-3 flex flex-col lg:flex-row gap-3 lg:items-center justify-between">
-        <div className="flex items-center gap-2">
-          <button aria-label="Periodo anterior" onClick={() => moveAnchor(-1)} className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50"><ChevronLeft size={18} /></button>
-          <button onClick={() => setAnchor(new Date())} className="px-3 py-2 rounded-lg border border-slate-200 text-xs font-bold">Hoy</button>
-          <button aria-label="Periodo siguiente" onClick={() => moveAnchor(1)} className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50"><ChevronRight size={18} /></button>
-          <h2 className="ml-2 text-sm md:text-base font-black text-slate-900 capitalize">{title}</h2>
+      <section className="toolbar-card justify-between p-4 sm:p-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <button aria-label="Periodo anterior" onClick={() => moveAnchor(-1)} className="control-height min-w-11 rounded-lg border border-slate-300 hover:bg-slate-50"><ChevronLeft className="mx-auto" size={19} /></button>
+          <button onClick={() => setAnchor(new Date())} className="control-height rounded-lg border border-slate-300 px-4 text-sm font-bold">Hoy</button>
+          <button aria-label="Periodo siguiente" onClick={() => moveAnchor(1)} className="control-height min-w-11 rounded-lg border border-slate-300 hover:bg-slate-50"><ChevronRight className="mx-auto" size={19} /></button>
+          <h2 className="ml-1 text-base font-bold capitalize text-slate-900 sm:ml-3 sm:text-lg">{title}</h2>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {(['dia', 'semana', 'mes', 'lista'] as AgendaView[]).map((item) => <button key={item} onClick={() => setView(item)} className={`px-3 py-2 rounded-lg text-xs font-bold capitalize ${view === item ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{item}</button>)}
+        <div className="segmented-control flex-wrap">
+          {(['dia', 'semana', 'mes', 'lista'] as AgendaView[]).map((item) => <button key={item} onClick={() => setView(item)} className={`control-height rounded-lg px-4 text-sm font-bold capitalize ${view === item ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}>{item}</button>)}
         </div>
       </section>
 
-      <section className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-3">
+      <section className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-4">
         <label className="relative md:col-span-2"><Search size={16} className="absolute left-3 top-3 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar evento, folio o responsable" className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm" /></label>
         <label className="relative"><Filter size={15} className="absolute left-3 top-3 text-slate-400" /><select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm"><option value="TODOS">Todos los tipos</option>{catalogs.tipos.map((item: any) => <option key={item.tipo} value={item.tipo}>{EVENT_LABELS[item.tipo]}</option>)}</select></label>
         <select value={userFilter} onChange={(e) => setUserFilter(e.target.value)} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm"><option value="TODOS">{canAssignOthers ? 'Todo el despacho' : 'Mi agenda'}</option>{assignableUsers.map((user: any) => <option key={user.id} value={user.id}>{user.nombre} {user.apellido}</option>)}</select>
@@ -231,15 +231,15 @@ export default function Agenda() {
 
       {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div>}
 
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_310px] gap-5">
-        <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden min-h-[560px]">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <section className="min-h-[640px] overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           {loading ? <div className="p-12 text-center text-slate-500">Cargando agenda…</div> : view === 'mes' ? (
-            <div>
-              <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">{WEEKDAYS.map((day) => <div key={day} className="p-2 text-center text-[11px] font-bold text-slate-500 uppercase">{day}</div>)}</div>
+            <div className="min-w-[920px]">
+              <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">{WEEKDAYS.map((day) => <div key={day} className="p-3 text-center text-xs font-bold uppercase text-slate-600">{day}</div>)}</div>
               <div className="grid grid-cols-7">{monthDays.map((day) => {
                 const inMonth = day.getMonth() === anchor.getMonth();
                 const dayEvents = visibleEvents.filter((event) => new Date(event.fecha_inicio).toDateString() === day.toDateString());
-                return <div key={day.toISOString()} className={`min-h-28 border-b border-r border-slate-100 p-1.5 ${inMonth ? 'bg-white' : 'bg-slate-50/70'}`}><button onClick={() => openCreate(day)} className={`w-7 h-7 rounded-full text-xs font-bold ${day.toDateString() === new Date().toDateString() ? 'bg-amber-500 text-white' : inMonth ? 'text-slate-800 hover:bg-slate-100' : 'text-slate-400'}`}>{day.getDate()}</button><div className="mt-1 space-y-1">{dayEvents.slice(0, 3).map(renderEvent)}{dayEvents.length > 3 && <button onClick={() => { setAnchor(day); setView('dia'); }} className="text-[10px] font-bold text-blue-700">+{dayEvents.length - 3} más</button>}</div></div>;
+                return <div key={day.toISOString()} className={`min-h-36 border-b border-r border-slate-100 p-2 ${inMonth ? 'bg-white' : 'bg-slate-50/70'}`}><button onClick={() => openCreate(day)} className={`h-8 w-8 rounded-full text-sm font-bold ${day.toDateString() === new Date().toDateString() ? 'bg-amber-600 text-white' : inMonth ? 'text-slate-800 hover:bg-slate-100' : 'text-slate-400'}`}>{day.getDate()}</button><div className="mt-1.5 space-y-1.5">{dayEvents.slice(0, 3).map(renderEvent)}{dayEvents.length > 3 && <button onClick={() => { setAnchor(day); setView('dia'); }} className="text-xs font-bold text-blue-700">+{dayEvents.length - 3} más</button>}</div></div>;
               })}</div>
             </div>
           ) : (
@@ -250,7 +250,7 @@ export default function Agenda() {
         <aside className="space-y-4">
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
             <div className="flex items-center justify-between mb-3"><h2 className="font-black text-slate-900">Tareas abiertas</h2><span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold">{tasks.length}</span></div>
-            <div className="space-y-2 max-h-[500px] overflow-y-auto">{tasks.slice(0, 20).map((task) => <div key={task.id} className="rounded-xl border border-slate-200 p-3"><div className="flex gap-2"><button aria-label={`Completar ${task.titulo}`} onClick={() => completeTask(task)} className="text-slate-400 hover:text-emerald-600"><CheckCircle2 size={18} /></button><div className="min-w-0"><p className="text-sm font-bold text-slate-900">{task.titulo}</p><p className="text-[11px] text-slate-500">{task.prioridad}{task.fecha_limite ? ` · ${new Date(task.fecha_limite).toLocaleDateString('es-MX')}` : ''}</p>{task.expediente && <button onClick={() => navigate(`/expedientes/${task.expediente_id}`)} className="text-[11px] text-blue-700 font-bold">{task.expediente.numero_pravia}</button>}</div></div></div>)}{tasks.length === 0 && <p className="text-sm text-slate-500 py-5 text-center">Sin tareas abiertas.</p>}</div>
+            <div className="max-h-[560px] space-y-3 overflow-y-auto pr-1">{tasks.slice(0, 20).map((task) => <div key={task.id} className="rounded-xl border border-slate-200 p-4"><div className="flex gap-3"><button aria-label={`Completar ${task.titulo}`} onClick={() => completeTask(task)} className="text-slate-400 hover:text-emerald-600"><CheckCircle2 size={20} /></button><div className="min-w-0"><p className="text-sm font-bold text-slate-900">{task.titulo}</p><p className="mt-1 text-xs text-slate-500">{task.prioridad}{task.fecha_limite ? ` · ${new Date(task.fecha_limite).toLocaleDateString('es-MX')}` : ''}</p>{task.expediente && <button onClick={() => navigate(`/expedientes/${task.expediente_id}`)} className="mt-1 text-xs font-bold text-blue-700">{task.expediente.numero_pravia}</button>}</div></div></div>)}{tasks.length === 0 && <p className="text-sm text-slate-500 py-5 text-center">Sin tareas abiertas.</p>}</div>
           </div>
         </aside>
       </div>

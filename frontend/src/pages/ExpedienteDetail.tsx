@@ -17,6 +17,7 @@ import { ModalNuevoCompareciente } from '../components/comparecientes/ModalNuevo
 import { ModalVincularCompareciente } from '../components/comparecientes/ModalVincularCompareciente';
 import { ExpedienteFinanzasTab } from '../components/expedientes/ExpedienteFinanzasTab';
 import { ExpedienteWorkflowPanel } from '../components/expedientes/ExpedienteWorkflowPanel';
+import { useConfirmation } from '../components/ui/ConfirmDialog';
 
 const CONCEPTOS_CATALOGO = [
   'Honorarios de la notaría',
@@ -59,6 +60,7 @@ interface NotariaRubro {
 }
 
 export default function ExpedienteDetail() {
+  const { requestConfirmation, confirmationDialog } = useConfirmation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -241,9 +243,14 @@ export default function ExpedienteDetail() {
 
   const handleValidateCompareciente = async (vinculo: any) => {
     const next = !vinculo.datos_validados;
-    const accepted = window.confirm(next
-      ? 'Confirma que revisaste la ficha y documentos de identidad de este compareciente.'
-      : 'La validación volverá a quedar pendiente. ¿Deseas continuar?');
+    const accepted = await requestConfirmation({
+      title: next ? 'Validar datos del compareciente' : 'Reabrir validación',
+      description: next
+        ? 'Confirma que revisaste la ficha y los documentos de identidad del compareciente.'
+        : 'La validación volverá a quedar pendiente y requerirá una nueva revisión.',
+      confirmLabel: next ? 'Confirmar validación' : 'Reabrir',
+      tone: next ? 'default' : 'warning',
+    });
     if (!accepted) return;
     setValidatingLinkId(vinculo.id);
     try {
@@ -484,14 +491,7 @@ export default function ExpedienteDetail() {
       const formData = new FormData();
       formData.append('file', proyectoFileToUpload);
       if (proyectoNotaVersion) formData.append('nota_version', proyectoNotaVersion);
-      formData.append('usuario_id', abogadoId || exp.abogado_id);
-
-      const res = await fetch(`/api/expedientes/${exp.id}/proyecto/upload`, {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!res.ok) throw new Error('Error al subir versión del proyecto');
+      await api.upload(`/expedientes/${exp.id}/proyecto/upload`, formData);
 
       addToast(`Nueva versión V${proyectoVigente ? proyectoVigente.version_numero + 1 : 2} cargada exitosamente`, 'success');
       setShowUploadProyectoModal(false);
@@ -508,7 +508,6 @@ export default function ExpedienteDetail() {
     try {
       await api.patch(`/expedientes/${exp.id}/proyecto/versions/${verId}`, {
         accion: 'RESTAURAR_VIGENTE',
-        usuario_id: abogadoId || exp.abogado_id,
       });
       addToast(`Versión V${verNum} restaurada como Proyecto Vigente`, 'success');
       await loadProyectoData();
@@ -517,18 +516,22 @@ export default function ExpedienteDetail() {
     }
   };
 
-  const handleVisualizarProyectoVersion = (verId: string, nombre: string) => {
+  const handleVisualizarProyectoVersion = async (verId: string, nombre: string) => {
     if (!exp) return;
-    const url = `/api/expedientes/${exp.id}/proyecto/versions/${verId}/visualizar`;
-    window.open(url, '_blank');
+    try {
+      const blob = await api.blob(`/expedientes/${exp.id}/proyecto/versions/${verId}/visualizar`);
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      addToast(`No fue posible abrir "${nombre}"`, 'error');
+    }
   };
 
   const handleDescargarProyectoVersion = async (verId: string, nombre: string) => {
     if (!exp) return;
     try {
-      const url = `/api/expedientes/${exp.id}/proyecto/versions/${verId}/descargar`;
-      const res = await fetch(url);
-      const blob = await res.blob();
+      const blob = await api.blob(`/expedientes/${exp.id}/proyecto/versions/${verId}/descargar`);
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
@@ -556,18 +559,22 @@ export default function ExpedienteDetail() {
     }
   };
 
-  const handleVisualizarReporteIA = () => {
+  const handleVisualizarReporteIA = async () => {
     if (!exp) return;
-    const url = `/api/expedientes/${exp.id}/proyecto/reporte-ia/visualizar`;
-    window.open(url, '_blank');
+    try {
+      const blob = await api.blob(`/expedientes/${exp.id}/proyecto/reporte-ia/visualizar`);
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      addToast('No fue posible abrir el reporte de IA', 'error');
+    }
   };
 
   const handleDescargarReporteIADocx = async () => {
     if (!exp) return;
     try {
-      const url = `/api/expedientes/${exp.id}/proyecto/reporte-ia/descargar`;
-      const res = await fetch(url);
-      const blob = await res.blob();
+      const blob = await api.blob(`/expedientes/${exp.id}/proyecto/reporte-ia/descargar`);
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
@@ -584,15 +591,8 @@ export default function ExpedienteDetail() {
   const handleDescargarCarpetaZip = async (folderName: string) => {
     if (!exp) return;
     try {
-      const url = `/api/expedientes/${exp.id}/documentos/descargar-zip?carpeta=${encodeURIComponent(folderName)}`;
       addToast(`Generando archivo ZIP para carpeta "${folderName}"...`, 'info');
-      const res = await fetch(url);
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        addToast(errJson.error || 'Error al generar descarga de ZIP', 'error');
-        return;
-      }
-      const blob = await res.blob();
+      const blob = await api.blob(`/expedientes/${exp.id}/documentos/descargar-zip?carpeta=${encodeURIComponent(folderName)}`);
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
@@ -669,13 +669,8 @@ export default function ExpedienteDetail() {
     formData.append('categoria', categoria);
     if (observaciones) formData.append('observaciones', observaciones);
 
-    const response = await fetch(`/api/expedientes/${exp.id}/documentos`, {
-      method: 'POST',
-      body: formData
-    });
-
-    const resData = await response.json().catch(() => ({}));
-    if (!response.ok || !resData.success || !resData.documento?.id) {
+    const resData = await api.upload(`/expedientes/${exp.id}/documentos`, formData);
+    if (!resData.success || !resData.documento?.id) {
       throw new Error(resData.error || resData.detail || 'Error al subir archivo al almacenamiento.');
     }
 
@@ -721,7 +716,7 @@ export default function ExpedienteDetail() {
     addToast(`Carpeta "${newFolderName.trim()}" creada`, 'success');
   };
 
-  const handleDeleteFolder = (folderName: string) => {
+  const handleDeleteFolder = async (folderName: string) => {
     if (folderName === 'Todas') {
       addToast('No se puede eliminar la vista general "Todas"', 'error');
       return;
@@ -734,7 +729,13 @@ export default function ExpedienteDetail() {
       return;
     }
 
-    if (!confirm(`¿Confirmas que deseas eliminar la carpeta "${folderName}"?`)) return;
+    const accepted = await requestConfirmation({
+      title: 'Eliminar carpeta vacía',
+      description: `La carpeta “${folderName}” dejará de mostrarse en este expediente.`,
+      confirmLabel: 'Eliminar carpeta',
+      tone: 'danger',
+    });
+    if (!accepted) return;
 
     setCarpetas(carpetas.filter(f => f !== folderName));
     if (selectedFolder === folderName) setSelectedFolder('Todas');
@@ -805,7 +806,13 @@ export default function ExpedienteDetail() {
 
   const handleDeleteDocumento = async (docId: string) => {
     if (!exp) return;
-    if (!confirm('¿Confirmas que deseas eliminar este documento del archivo?')) return;
+    const accepted = await requestConfirmation({
+      title: 'Desvincular documento',
+      description: 'El documento dejará de aparecer en este expediente. El archivo maestro y su bitácora se conservarán.',
+      confirmLabel: 'Desvincular',
+      tone: 'warning',
+    });
+    if (!accepted) return;
     try {
       await api.delete(`/expedientes/${exp.id}/documentos/${docId}`);
       addToast('Documento eliminado del archivo con bitácora registrada', 'success');
@@ -834,13 +841,7 @@ export default function ExpedienteDetail() {
   const handleVisualizarDoc = async (docId: string, docNombre: string) => {
     if (!exp) return;
     try {
-      const backendUrl = `/api/expedientes/${exp.id}/documentos/${docId}/visualizar`;
-      const res = await fetch(backendUrl);
-      if (!res.ok) {
-        addToast('El archivo no se encuentra en el almacenamiento', 'error');
-        return;
-      }
-      const blob = await res.blob();
+      const blob = await api.blob(`/expedientes/${exp.id}/documentos/${docId}/visualizar`);
       const blobUrl = URL.createObjectURL(blob);
       window.open(blobUrl, '_blank', 'noopener,noreferrer');
     } catch (e) {
@@ -851,13 +852,7 @@ export default function ExpedienteDetail() {
   const handleDescargarDoc = async (docId: string, docNombre: string) => {
     if (!exp) return;
     try {
-      const backendUrl = `/api/expedientes/${exp.id}/documentos/${docId}/descargar`;
-      const res = await fetch(backendUrl);
-      if (!res.ok) {
-        addToast('No fue posible descargar el archivo', 'error');
-        return;
-      }
-      const blob = await res.blob();
+      const blob = await api.blob(`/expedientes/${exp.id}/documentos/${docId}/descargar`);
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;
@@ -2002,6 +1997,7 @@ export default function ExpedienteDetail() {
           </div>
         </div>
       )}
+      {confirmationDialog}
 
     </div>
   );

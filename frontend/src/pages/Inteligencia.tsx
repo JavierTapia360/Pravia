@@ -48,19 +48,19 @@ export default function Inteligencia() {
   if (loading && !data) return <div className="flex min-h-[420px] items-center justify-center text-slate-500"><Loader2 className="mr-2 animate-spin" size={20} />Cargando consumo de IA…</div>;
 
   return (
-    <div className="mx-auto max-w-[1500px] space-y-6">
+    <div className="module-page intelligence-page">
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="grid gap-6 px-6 py-7 lg:grid-cols-[1.4fr_0.8fr] lg:px-8">
+        <div className="grid gap-8 px-6 py-7 lg:grid-cols-[1.3fr_0.9fr] lg:px-8 lg:py-8">
           <div>
             <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-indigo-700"><Sparkles size={17} />Asistencia documental controlada</div>
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Centro de Inteligencia</h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">Extracción con fuente, validación determinística, revisión humana y consumo medible. La IA propone; el equipo jurídico decide.</p>
+            <h1 className="module-title">Centro de Inteligencia</h1>
+            <p className="module-description mt-3">Extracción con fuente, validación determinística, revisión humana y consumo medible. La IA propone; el equipo jurídico decide.</p>
             <div className="mt-5 flex flex-wrap gap-3">
               <button type="button" onClick={() => navigate('/comparecientes/nuevo')} className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"><FileSearch size={17} />Extraer documentos</button>
               <button type="button" onClick={() => navigate('/expedientes')} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Revisar proyecto <ArrowRight size={16} /></button>
             </div>
           </div>
-          <div className="rounded-xl border border-indigo-100 bg-indigo-50/70 p-5">
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-6">
             <div className="flex items-start justify-between gap-3">
               <div><p className="text-xs font-semibold uppercase tracking-wider text-indigo-700">Configuración activa</p><p className="mt-1 text-lg font-semibold text-slate-950">{data?.configuracion.modelo_principal}</p></div>
               <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${data?.configuracion.api_key_configurada ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}`}>{data?.configuracion.api_key_configurada ? 'Proveedor listo' : 'Clave pendiente'}</span>
@@ -74,7 +74,7 @@ export default function Inteligencia() {
         </div>
       </section>
 
-      <section className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-center">
+      <section className="toolbar-card flex-col md:flex-row">
         <select value={periodo} onChange={(event) => setPeriodo(event.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="HOY">Hoy</option><option value="ESTE_MES">Este mes</option><option value="30_DIAS">Últimos 30 días</option><option value="TODO">Todo</option></select>
         <select value={usuarioId} onChange={(event) => setUsuarioId(event.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="TODOS">Todos los usuarios</option>{data?.usuarios.map((user) => <option key={user.id} value={user.id}>{user.nombre} {user.apellido}</option>)}</select>
         <select value={operacion} onChange={(event) => setOperacion(event.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="TODAS">Todas las operaciones</option>{data?.operaciones.map((item) => <option key={item} value={item}>{operationLabel(item)}</option>)}</select>
@@ -89,14 +89,14 @@ export default function Inteligencia() {
           { label: 'Tokens totales', value: number.format(data?.metricas.total_tokens || 0), detail: `${number.format(data?.metricas.reasoning_tokens || 0)} razonamiento`, icon: Gauge },
           { label: 'Costo estimado', value: money.format(data?.metricas.costo_estimado_usd || 0), detail: 'Sin cargos ocultos', icon: CircleDollarSign },
           { label: 'Escalamientos', value: number.format(data?.metricas.escalaciones || 0), detail: `${data?.metricas.fallidas || 0} solicitudes fallidas`, icon: Sparkles },
-        ].map((card) => <article key={card.label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><p className="text-sm font-medium text-slate-500">{card.label}</p><card.icon className="text-indigo-600" size={19} /></div><p className="mt-3 text-2xl font-semibold text-slate-950">{card.value}</p><p className="mt-1 text-xs text-slate-500">{card.detail}</p></article>)}
+        ].map((card) => <article key={card.label} className="metric-card"><div className="flex items-center justify-between"><p className="metric-label normal-case tracking-normal">{card.label}</p><card.icon className="text-indigo-600" size={21} /></div><p className="metric-value">{card.value}</p><p className="mt-2 text-[13px] text-slate-500">{card.detail}</p></article>)}
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
-        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm lg:p-7">
           <h2 className="text-lg font-semibold text-slate-950">Flujo de confirmación</h2>
           <p className="mt-1 text-sm text-slate-500">Ningún dato jurídico sensible se vuelve definitivo de forma silenciosa.</p>
-          <ol className="mt-5 grid gap-3 sm:grid-cols-5">
+          <ol className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             {[
               ['1', 'Documento'], ['2', 'Extracción'], ['3', 'Validación'], ['4', 'Revisión humana'], ['5', 'Persistencia'],
             ].map(([step, label]) => <li key={step} className="rounded-lg border border-slate-200 bg-slate-50 p-3"><span className="text-xs font-bold text-indigo-700">{step}</span><p className="mt-1 text-sm font-semibold text-slate-800">{label}</p></li>)}
@@ -108,7 +108,7 @@ export default function Inteligencia() {
           </div>
         </article>
 
-        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm lg:p-7">
           <h2 className="text-lg font-semibold text-slate-950">Jerarquía documental</h2>
           <p className="mt-1 text-sm text-slate-500">Prioridad configurable sin ocultar discrepancias.</p>
           <div className="mt-5 space-y-3">
@@ -119,7 +119,7 @@ export default function Inteligencia() {
               ['Domicilio particular', 'Comprobante → identificación'],
             ].map(([label, detail]) => <div key={label} className="flex gap-3 rounded-lg border border-slate-200 p-3"><FileCheck2 className="mt-0.5 shrink-0 text-slate-500" size={18} /><div><p className="text-sm font-semibold text-slate-900">{label}</p><p className="text-xs leading-5 text-slate-500">{detail}</p></div></div>)}
           </div>
-          <p className="mt-4 flex gap-2 rounded-lg bg-slate-950 px-4 py-3 text-xs leading-5 text-slate-200"><Scale className="shrink-0 text-amber-300" size={17} />IA ≠ aprobación jurídica. Todo borrador generado o asistido requiere revisión profesional.</p>
+          <p className="mt-4 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] leading-5 text-amber-950"><Scale className="shrink-0 text-amber-700" size={17} />IA ≠ aprobación jurídica. Todo borrador generado o asistido requiere revisión profesional.</p>
         </article>
       </section>
 

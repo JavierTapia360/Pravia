@@ -183,7 +183,7 @@ export const uploadProyectoVersion = async (req: Request, res: Response) => {
       });
     }
 
-    const userId = (req as any).user?.id || req.body.usuario_id;
+    const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Usuario autenticado requerido para cargar una versión.' });
     const [user, expediente] = await Promise.all([
       prisma.user.findFirst({ where: { id: userId, activo: true }, select: { id: true, nombre: true, apellido: true } }),
@@ -279,7 +279,7 @@ export const uploadProyectoVersion = async (req: Request, res: Response) => {
 export const updateProyectoVersion = async (req: Request, res: Response) => {
   try {
     const { id, versionId } = req.params;
-    const { accion, nuevo_nombre, nota_version, usuario_id } = req.body;
+    const { accion, nuevo_nombre, nota_version } = req.body;
 
     const databaseDocument = await prisma.documento.findFirst({
       where: { id: versionId, expediente_id: id, tipo: 'PROYECTO_ESCRITURA' },
@@ -289,7 +289,8 @@ export const updateProyectoVersion = async (req: Request, res: Response) => {
       }
     });
     if (databaseDocument) {
-      const actorId = (req as any).user?.id || usuario_id || databaseDocument.subido_por_id;
+      const actorId = req.user?.id;
+      if (!actorId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
       const actor = await prisma.user.findFirst({ where: { id: actorId, activo: true }, select: { id: true } });
       if (!actor) return res.status(403).json({ error: 'Usuario activo requerido para actualizar el proyecto.' });
       const currentMeta = projectMeta(databaseDocument);
@@ -426,7 +427,8 @@ export const analizarProyectoConIA = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
-    let userId = (req as any).user?.id || req.body.usuario_id;
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
     usageUserId = userId;
     let userName = 'Usuario no identificado';
 
@@ -746,11 +748,8 @@ export const downloadCarpetaZip = async (req: Request, res: Response) => {
     const { id } = req.params;
     const carpetaQuery = (req.query.carpeta as string) || 'Todas';
 
-    let userId = (req as any).user?.id || req.body?.usuario_id;
-    if (!userId) {
-      const u = await prisma.user.findFirst();
-      if (u) userId = u.id;
-    }
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     const exp = await prisma.expediente.findUnique({
       where: { id },
@@ -1082,20 +1081,13 @@ export const getDatosDetectadosMatrix = async (req: Request, res: Response) => {
 export const generarProyectoConIA = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { matriz_confirmada, usuario_id } = req.body;
+    const { matriz_confirmada } = req.body;
 
-    let userId = (req as any).user?.id || usuario_id;
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
     let userName = 'Abogado Responsable';
-    if (userId) {
-      const u = await prisma.user.findUnique({ where: { id: userId } });
-      if (u) userName = u.nombre;
-    } else {
-      const u = await prisma.user.findFirst();
-      if (u) {
-        userId = u.id;
-        userName = u.nombre;
-      }
-    }
+    const u = await prisma.user.findUnique({ where: { id: userId } });
+    if (u) userName = u.nombre;
 
     const exp = await prisma.expediente.findUnique({
       where: { id },

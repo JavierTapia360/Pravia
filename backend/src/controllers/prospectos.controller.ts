@@ -2,20 +2,13 @@ import { Request, Response } from 'express';
 import prisma from '../config/prisma';
 import { logAudit } from '../utils/auditLogger';
 import { ProspectoEstado } from '@prisma/client';
-
-// Fallback temporal mientras la sesión real se integra en la fase de Auth.
-// Nunca crea identidades ficticias en la base de datos.
-const getDefaultUserId = async () => {
-  const user = await prisma.user.findFirst({ where: { activo: true }, orderBy: { created_at: 'asc' } });
-  if (!user) throw new Error('No existe un usuario activo para registrar la operación.');
-  return user.id;
-};
+import { prospectoObjectWhere } from '../services/objectAccess.service';
 
 export const getProspectos = async (req: Request, res: Response) => {
   try {
     const { busqueda, estado, prioridad } = req.query;
     
-    const where: any = { archived_at: null };
+    const where: any = { archived_at: null, ...(req.user ? prospectoObjectWhere(req.user) : {}) };
     
     if (estado) where.estado = estado;
     if (prioridad) where.prioridad = prioridad;
@@ -54,8 +47,9 @@ export const getProspectos = async (req: Request, res: Response) => {
 
 export const createProspecto = async (req: Request, res: Response) => {
   try {
-    const { user_id, ...rawData } = req.body;
-    const userId = user_id || await getDefaultUserId();
+    const rawData = req.body;
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     // Sanitize: remove empty strings, convert to null for optional fields
     const data: any = {};
@@ -130,8 +124,9 @@ export const getProspectoById = async (req: Request, res: Response) => {
 export const updateProspecto = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { user_id, ...data } = req.body;
-    const userId = user_id || await getDefaultUserId();
+    const data = req.body;
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     // Remove undefined/empty fields to avoid overwriting with blanks
     const cleanData: any = {};
@@ -155,8 +150,9 @@ export const updateProspecto = async (req: Request, res: Response) => {
 export const deleteProspecto = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { user_id, motivo } = req.body;
-    const userId = user_id || await getDefaultUserId();
+    const { motivo } = req.body;
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     const prospecto = await prisma.prospecto.update({
       where: { id },
@@ -178,8 +174,9 @@ export const deleteProspecto = async (req: Request, res: Response) => {
 export const addSeguimiento = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { user_id, tipo, contenido, proxima_accion, fecha_proximo_seguimiento } = req.body;
-    const userId = user_id || await getDefaultUserId();
+    const { tipo, contenido, proxima_accion, fecha_proximo_seguimiento } = req.body;
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     if (!tipo || !contenido) {
       return res.status(400).json({ error: 'Los campos "tipo" y "contenido" son obligatorios.' });

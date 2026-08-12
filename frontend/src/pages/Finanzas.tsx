@@ -211,10 +211,10 @@ export default function Finanzas() {
   };
 
   return (
-    <div className="p-6 md:p-8 space-y-8 max-w-7xl mx-auto">
+    <div className="module-page finance-page">
       
       {/* ── 1. ENCABEZADO Y CONTROL DE PERMISOS / ROL DE USUARIO ────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+      <div className="module-page-header">
         <div>
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
@@ -224,11 +224,11 @@ export default function Finanzas() {
               Rol: {userRole}
             </span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight mt-1 flex items-center gap-3">
+          <h1 className="module-title mt-2 flex items-center gap-3">
             <Wallet className="w-8 h-8 text-amber-600" />
             Administración Financiera PRAVIA OS
           </h1>
-          <p className="text-xs md:text-sm text-slate-500 mt-1">
+          <p className="module-description">
             Control económico consolidado del despacho, cobranza, egresos a terceros y honorarios esperados, generados y recibidos.
           </p>
         </div>
@@ -238,7 +238,7 @@ export default function Finanzas() {
             type="button"
             onClick={cargarDatos}
             disabled={loading}
-            className="px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs shadow-sm border border-slate-200 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            className="btn btn-secondary btn-md"
           >
             <RefreshCw className={`w-4 h-4 text-amber-600 ${loading ? 'animate-spin' : ''}`} />
             Actualizar
@@ -247,7 +247,7 @@ export default function Finanzas() {
       </div>
 
       {/* ── 2. NAVEGACIÓN POR PESTAÑAS PRINCIPALES ──────────────────────── */}
-      <div className="flex border-b border-slate-200 overflow-x-auto bg-slate-50 p-1.5 rounded-2xl gap-1">
+      <div className="segmented-control w-full overflow-x-auto p-1.5">
         {[
           { id: 'resumen', label: 'Resumen General', icon: <PieChart className="w-4 h-4" /> },
           { id: 'movimientos', label: 'Movimientos', icon: <CreditCard className="w-4 h-4" /> },
@@ -258,7 +258,7 @@ export default function Finanzas() {
           <button
             key={t.id}
             onClick={() => setTab(t.id as any)}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+            className={`control-height flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeTab === t.id
                 ? 'bg-amber-500 text-white shadow-md'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
@@ -271,7 +271,7 @@ export default function Finanzas() {
       </div>
 
       {/* ── 3. BARRA DE FILTROS GLOBAL ──────────────────────────────────── */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+      <div className="surface-card space-y-4 p-5">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-3">
           
           {/* Búsqueda */}
@@ -282,7 +282,7 @@ export default function Finanzas() {
               placeholder="Buscar por folio, cliente, concepto, notaría..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-amber-400 outline-none"
+              className="control-height w-full rounded-xl border border-slate-300 bg-slate-50 pl-9 pr-3 text-sm text-slate-900 outline-none focus:border-blue-800 focus:ring-2 focus:ring-blue-800/15"
             />
           </div>
 
@@ -291,7 +291,7 @@ export default function Finanzas() {
             <select
               value={periodo}
               onChange={(e) => setPeriodo(e.target.value)}
-              className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-amber-400 outline-none font-semibold"
+              className="control-height w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-900 outline-none focus:border-blue-800 focus:ring-2 focus:ring-blue-800/15"
             >
               <option value="TODOS">Periodo: Todos</option>
               <option value="HOY">Hoy</option>
@@ -306,7 +306,7 @@ export default function Finanzas() {
             <select
               value={notariaId}
               onChange={(e) => setNotariaId(e.target.value)}
-              className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-amber-400 outline-none font-semibold"
+              className="control-height w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-900 outline-none focus:border-blue-800 focus:ring-2 focus:ring-blue-800/15"
             >
               <option value="TODOS">Notaría: Todas</option>
               {catalogos.notarias.map((n) => (
@@ -322,7 +322,7 @@ export default function Finanzas() {
             <select
               value={abogadoId}
               onChange={(e) => setAbogadoId(e.target.value)}
-              className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-amber-400 outline-none font-semibold"
+              className="control-height w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-900 outline-none focus:border-blue-800 focus:ring-2 focus:ring-blue-800/15"
             >
               <option value="TODOS">Abogado: Todos</option>
               {catalogos.abogados.map((a) => (
@@ -338,7 +338,7 @@ export default function Finanzas() {
             <select
               value={tipoActoId}
               onChange={(e) => setTipoActoId(e.target.value)}
-              className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-amber-400 outline-none font-semibold"
+              className="control-height w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-900 outline-none focus:border-blue-800 focus:ring-2 focus:ring-blue-800/15"
             >
               <option value="TODOS">Acto: Todos</option>
               {catalogos.tipos_acto.map((ta) => (
@@ -395,7 +395,7 @@ export default function Finanzas() {
         <div className="space-y-8">
           
           {/* TABLERO SUPERIOR CON INDICADORES CONTABLES SEPARADOS */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="finance-kpi-grid grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             
             {/* 1. Honorarios Esperados */}
             <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-1">
@@ -505,7 +505,7 @@ export default function Finanzas() {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+              <table className="finance-table w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-100/70 text-[11px] font-bold text-slate-600 uppercase tracking-wider">
                     <th className="py-3 px-4">Folio / Acto</th>
@@ -600,7 +600,7 @@ export default function Finanzas() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="finance-table w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-100/70 text-[11px] font-bold text-slate-600 uppercase tracking-wider">
                   <th className="py-3 px-4">Fecha</th>
@@ -695,7 +695,7 @@ export default function Finanzas() {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+              <table className="finance-table w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-100/70 text-[11px] font-bold text-slate-600 uppercase tracking-wider">
                     <th className="py-3 px-4">Folio</th>
@@ -770,7 +770,7 @@ export default function Finanzas() {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+              <table className="finance-table w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-100/70 text-[11px] font-bold text-slate-600 uppercase tracking-wider">
                     <th className="py-3 px-4">Fecha</th>
@@ -836,7 +836,7 @@ export default function Finanzas() {
               Desglose de Honorarios por Abogado
             </h3>
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
+              <table className="finance-table w-full text-left border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-600 uppercase">
                     <th className="py-2.5 px-3">Abogado</th>

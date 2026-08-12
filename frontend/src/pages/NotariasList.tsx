@@ -5,10 +5,12 @@ import {
 } from 'lucide-react';
 import { useNotariasStore, Notaria, NotariaContacto } from '../stores/notariasStore';
 import { useToastStore } from '../stores/toastStore';
+import { useConfirmation } from '../components/ui/ConfirmDialog';
 
 export default function NotariasList() {
   const { notarias, loading, fetchNotarias, createNotaria, updateNotaria, setPredeterminada, archiveNotaria } = useNotariasStore();
   const { addToast } = useToastStore();
+  const { requestConfirmation, confirmationDialog } = useConfirmation();
 
   const [search, setSearch] = useState('');
   const [filterActiva, setFilterActiva] = useState<'TODAS' | 'ACTIVAS' | 'INACTIVAS'>('TODAS');
@@ -161,9 +163,17 @@ export default function NotariasList() {
     setFormTouched(true);
   };
 
-  const handleCloseModal = () => {
+  const handleCloseModal = async () => {
     if (saving) return;
-    if (formTouched && !confirm('¿Cerrar sin guardar los cambios de esta ficha?')) return;
+    if (formTouched) {
+      const accepted = await requestConfirmation({
+        title: 'Cerrar sin guardar',
+        description: 'Los cambios realizados en esta ficha de notaría se perderán.',
+        confirmLabel: 'Descartar cambios',
+        tone: 'warning',
+      });
+      if (!accepted) return;
+    }
     setShowModal(false);
     setFormError('');
   };
@@ -216,7 +226,13 @@ export default function NotariasList() {
   };
 
   const handleArchiveNotaria = async (id: string, nombre: string) => {
-    if (!confirm(`¿Archivar la notaría "${nombre}"? Sus contactos, cotizaciones y expedientes se conservarán.`)) return;
+    const accepted = await requestConfirmation({
+      title: 'Archivar notaría',
+      description: `“${nombre}” dejará de estar disponible para nuevas operaciones. Sus contactos, cotizaciones y expedientes se conservarán.`,
+      confirmLabel: 'Archivar notaría',
+      tone: 'danger',
+    });
+    if (!accepted) return;
     try {
       await archiveNotaria(id);
       addToast(`Notaría "${nombre}" archivada de forma reversible`, 'success');
@@ -243,19 +259,19 @@ export default function NotariasList() {
   });
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto fade-in">
+    <div className="module-page notarias-page fade-in">
       
       {/* HEADER BAR */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-700 shadow-sm">
+      <div className="module-page-header">
+        <div className="module-page-header__identity">
+          <div className="module-page-header__icon">
             <Building2 size={26} />
           </div>
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-950 tracking-tight">
+            <h1 className="module-title">
               Catálogo Maestro de Notarías
             </h1>
-            <p className="text-sm text-slate-600 mt-0.5">
+            <p className="module-description">
               Gestión centralizada de notarías, contactos operativos y tiempos para PRAVIA OS
             </p>
           </div>
@@ -264,7 +280,7 @@ export default function NotariasList() {
         <button
           type="button"
           onClick={handleOpenCreateModal}
-          className="min-h-11 px-5 rounded-xl bg-amber-700 hover:bg-amber-800 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-800 focus:ring-offset-2"
+          className="btn btn-primary btn-lg"
         >
           <Plus size={16} />
           <span>Registrar Notaría</span>
@@ -272,15 +288,15 @@ export default function NotariasList() {
       </div>
 
       {/* SEARCH AND FILTERS BAR */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
-        <div className="relative flex-1 w-full sm:max-w-md">
+      <div className="toolbar-card justify-between">
+        <div className="relative flex-1 w-full sm:max-w-xl">
           <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
           <input
             type="text"
             placeholder="Buscar por número, nombre, notario o municipio..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full min-h-11 bg-white border border-slate-300 rounded-xl pl-10 pr-4 py-2 text-base sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-800 focus:border-blue-800"
+            className="control-height w-full rounded-xl border border-slate-300 bg-white pl-10 pr-4 text-base text-slate-900 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-800/15 sm:text-sm"
           />
         </div>
 
@@ -288,7 +304,7 @@ export default function NotariasList() {
           <button
             type="button"
             onClick={() => setFilterActiva('TODAS')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+            className={`control-height px-4 py-2 rounded-xl text-sm font-bold transition-all ${
               filterActiva === 'TODAS' ? 'bg-blue-900 text-white shadow-sm' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
             }`}
           >
@@ -297,7 +313,7 @@ export default function NotariasList() {
           <button
             type="button"
             onClick={() => setFilterActiva('ACTIVAS')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+            className={`control-height px-4 py-2 rounded-xl text-sm font-bold transition-all ${
               filterActiva === 'ACTIVAS' ? 'bg-emerald-700 text-white shadow-sm' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
             }`}
           >
@@ -306,7 +322,7 @@ export default function NotariasList() {
           <button
             type="button"
             onClick={() => setFilterActiva('INACTIVAS')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+            className={`control-height px-4 py-2 rounded-xl text-sm font-bold transition-all ${
               filterActiva === 'INACTIVAS' ? 'bg-slate-700 text-white shadow-sm' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
             }`}
           >
@@ -322,11 +338,11 @@ export default function NotariasList() {
           <p className="text-xs font-semibold">Cargando catálogo de notarías...</p>
         </div>
       ) : filteredNotarias.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="notarias-grid grid gap-6">
           {filteredNotarias.map((n) => (
             <div
               key={n.id}
-              className={`bg-white border rounded-2xl p-5 space-y-4 shadow-sm transition-colors relative overflow-hidden flex flex-col justify-between ${
+              className={`bg-white border rounded-2xl p-6 space-y-5 shadow-sm transition-colors relative overflow-hidden flex flex-col ${
                 n.predeterminada 
                   ? 'border-amber-400 ring-1 ring-amber-200'
                   : n.activa
@@ -344,9 +360,9 @@ export default function NotariasList() {
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="text-base font-extrabold text-slate-950">{n.nombre}</h3>
+                        <h3 className="text-lg font-extrabold leading-snug text-slate-950">{n.nombre}</h3>
                       </div>
-                      <p className="text-xs text-slate-600 flex items-center gap-1 mt-0.5">
+                      <p className="mt-1 flex items-center gap-1 text-[13px] text-slate-600">
                         <MapPin size={12} className="text-amber-700" />
                         {n.municipio}, {n.entidad_federativa}
                       </p>
@@ -354,7 +370,7 @@ export default function NotariasList() {
                   </div>
 
                   {n.predeterminada && (
-                    <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 text-[10px] font-extrabold border border-amber-200 flex items-center gap-1 shadow-sm shrink-0">
+                    <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 text-xs font-extrabold border border-amber-200 flex items-center gap-1 shadow-sm shrink-0">
                       <Star size={11} className="fill-amber-700" /> Predeterminada
                     </span>
                   )}
@@ -365,7 +381,7 @@ export default function NotariasList() {
                   <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs flex items-center gap-2">
                     <User size={14} className="text-slate-500 shrink-0" />
                     <div>
-                      <span className="text-[10px] text-slate-500 uppercase font-bold block">Notario titular</span>
+                      <span className="block text-xs font-bold uppercase text-slate-500">Notario titular</span>
                       <span className="font-bold text-slate-900">{n.notario_titular}</span>
                     </div>
                   </div>
@@ -400,21 +416,21 @@ export default function NotariasList() {
                 </div>
 
                 {(n.tiempo_respuesta || n.tiempo_presupuesto || n.tiempo_firma) && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[13px]">
                     {n.tiempo_respuesta && (
-                      <div className="rounded-lg bg-slate-50 border border-slate-200 p-2">
+                      <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
                         <span className="block text-slate-500">Respuesta</span>
                         <strong className="text-slate-900">{n.tiempo_respuesta}</strong>
                       </div>
                     )}
                     {n.tiempo_presupuesto && (
-                      <div className="rounded-lg bg-slate-50 border border-slate-200 p-2">
+                      <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
                         <span className="block text-slate-500">Presupuesto</span>
                         <strong className="text-slate-900">{n.tiempo_presupuesto}</strong>
                       </div>
                     )}
                     {n.tiempo_firma && (
-                      <div className="rounded-lg bg-slate-50 border border-slate-200 p-2">
+                      <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
                         <span className="block text-slate-500">Firma</span>
                         <strong className="text-slate-900">{n.tiempo_firma}</strong>
                       </div>
@@ -423,12 +439,12 @@ export default function NotariasList() {
                 )}
 
                 {/* CONTACTOS OPERATIVOS COUNT */}
-                <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-200 text-slate-600">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-3 text-[13px] text-slate-600">
                   <span className="flex items-center gap-1">
                     <Users size={13} className="text-amber-700" />
                     {n.contactos?.length || 0} contacto(s) operativo(s)
                   </span>
-                  <div className="flex items-center gap-2 font-mono text-[11px]">
+                  <div className="flex items-center gap-2 font-mono text-xs">
                     <span className="text-blue-700 font-semibold">{n._count?.cotizaciones || 0} cotiz.</span>
                     <span>•</span>
                     <span className="text-emerald-700 font-semibold">{n._count?.expedientes || 0} exp.</span>
@@ -921,6 +937,7 @@ export default function NotariasList() {
           </form>
         </div>
       )}
+      {confirmationDialog}
 
     </div>
   );

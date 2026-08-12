@@ -13,7 +13,8 @@ export class ComparecienteAltaSessionController {
    */
   static async iniciarSesion(req: Request, res: Response) {
     try {
-      const usuario_id = (req as any).user?.id || req.body.usuario_id || '00000000-0000-0000-0000-000000000001';
+      const usuario_id = req.user?.id;
+      if (!usuario_id) return res.status(401).json({ success: false, ok: false, error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
       const { tipo_persona, idempotency_key, origen_expediente_id, correlation_id } = req.body;
 
       const sesion = await ComparecienteAltaSessionService.iniciarOSentarseSesion({
@@ -111,7 +112,8 @@ export class ComparecienteAltaSessionController {
       }
 
       const archivo = req.file;
-      const usuarioId = (req as any).user?.id || req.body.usuario_id;
+      const usuarioId = req.user?.id;
+      if (!usuarioId) return res.status(401).json({ success: false, ok: false, error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
       const tipoDocumento = req.body.tipo_documento || 'OTRO';
 
       if (!archivo) {
@@ -273,7 +275,8 @@ export class ComparecienteAltaSessionController {
         });
       }
 
-      const usuarioId = (req as any).user?.id || req.body.usuario_id;
+      const usuarioId = req.user?.id;
+      if (!usuarioId) return res.status(401).json({ success: false, ok: false, error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
       const resultado = await ComparecienteAltaSessionService.confirmarAltaDefinitiva({
         sessionId,
         usuarioId,

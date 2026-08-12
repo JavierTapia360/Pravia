@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { renderAsync } from 'docx-preview';
 import { ArrowLeft, ZoomIn, ZoomOut, RotateCcw, Download, FileText, Search, ShieldCheck, Cpu } from 'lucide-react';
+import { api } from '../services/api';
 
 export const ProyectoDocumentViewerPage: React.FC = () => {
   const { expedienteId, versionId } = useParams<{ expedienteId: string; versionId: string }>();
@@ -23,16 +24,14 @@ export const ProyectoDocumentViewerPage: React.FC = () => {
     setLoading(true);
     try {
       // 1. Obtener metadatos del proyecto
-      const metaRes = await fetch(`/api/expedientes/${expedienteId}/proyecto`);
-      if (metaRes.ok) {
-        const metaData = await metaRes.json();
-        const v = metaData.versiones?.find((x: any) => x.id === versionId);
-        if (v) setVersionInfo(v);
-      }
+      const metaData = await api.get(`/expedientes/${expedienteId}/proyecto`);
+      const allVersions = [metaData.vigente, ...(metaData.historial || [])].filter(Boolean);
+      const v = allVersions.find((x: any) => x.id === versionId);
+      if (v) setVersionInfo(v);
 
       // 2. Transmitir el archivo binario .docx y renderizarlo con docx-preview
-      const res = await fetch(`/api/expedientes/${expedienteId}/proyecto/versions/${versionId}/visualizar`);
-      if (res.ok && containerRef.current) {
+      const res = await api.response(`/expedientes/${expedienteId}/proyecto/versions/${versionId}/visualizar`);
+      if (containerRef.current) {
         const buffer = await res.arrayBuffer();
         containerRef.current.innerHTML = '';
         await renderAsync(buffer, containerRef.current, undefined, {
@@ -52,6 +51,15 @@ export const ProyectoDocumentViewerPage: React.FC = () => {
   const handleZoomIn = () => setZoom(prev => Math.min(prev + 15, 200));
   const handleZoomOut = () => setZoom(prev => Math.max(prev - 15, 50));
   const handleResetZoom = () => setZoom(100);
+  const handleDownload = async () => {
+    const blob = await api.blob(`/expedientes/${expedienteId}/proyecto/versions/${versionId}/descargar`);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = versionInfo?.nombre_original || 'proyecto.docx';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="min-h-screen bg-dark-bg text-white flex flex-col p-6 space-y-6">
@@ -116,14 +124,14 @@ export const ProyectoDocumentViewerPage: React.FC = () => {
           </div>
 
           {/* Botón Descargar .docx */}
-          <a
-            href={`/api/expedientes/${expedienteId}/proyecto/versions/${versionId}/descargar`}
-            download
+          <button
+            type="button"
+            onClick={() => void handleDownload()}
             className="flex items-center gap-2 bg-gold hover:bg-gold-light text-dark-bg font-extrabold text-xs px-4 py-2 rounded-xl shadow-lg shadow-gold/10 transition-all"
           >
             <Download size={16} />
             Descargar .docx
-          </a>
+          </button>
         </div>
       </div>
 

@@ -33,6 +33,9 @@ const [worker, offline, index] = await Promise.all([
 if (!worker.includes("url.pathname.startsWith('/api/')") || !worker.includes("request.method !== 'GET'")) {
   throw new Error('El service worker no protege explícitamente las operaciones/API.');
 }
+if (worker.includes("['/', '/index.html'") || !worker.includes("cache: 'no-store'") || !worker.includes("url.pathname.startsWith('/assets/')")) {
+  throw new Error('El service worker puede mezclar HTML y bundles de despliegues distintos.');
+}
 if (!offline.includes('Sin conexión al servidor')) throw new Error('Falta el shell sin conexión.');
 if (!index.includes('manifest.webmanifest')) throw new Error('El HTML no enlaza el manifest.');
 await stat(fromDist('icons/pravia-mark.svg'));

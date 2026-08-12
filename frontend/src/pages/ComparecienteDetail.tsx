@@ -28,6 +28,7 @@ import {
   Folder
 } from 'lucide-react';
 import { comparecientesService } from '../services/comparecientes.service';
+import { api } from '../services/api';
 
 const DOCUMENT_CATEGORY_BY_FOLDER: Record<string, string> = {
   'Identificación': 'IDENTIFICACION',
@@ -96,8 +97,7 @@ export default function ComparecienteDetail() {
 
   const fetchDocumentos = async (compMasterId: string) => {
     try {
-      const res = await fetch(`/api/comparecientes/${compMasterId}/documentos`);
-      const data = await res.json();
+      const data = await api.get(`/comparecientes/${compMasterId}/documentos`);
       if (data.success && data.data) {
         setArchivoDocs(data.data.documentos || []);
         setCarpetasSugeridas(data.data.carpetas_sugeridas || []);
@@ -118,12 +118,7 @@ export default function ComparecienteDetail() {
       formData.append('file', file);
       formData.append('categoria', carpetaSeleccionada === 'TODAS' ? 'OTROS' : (DOCUMENT_CATEGORY_BY_FOLDER[carpetaSeleccionada] || 'OTROS'));
 
-      const res = await fetch(`/api/comparecientes/${id}/documentos`, {
-        method: 'POST',
-        body: formData
-      });
-
-      const data = await res.json();
+      const data = await api.upload(`/comparecientes/${id}/documentos`, formData);
       if (data.success) {
         await fetchDocumentos(id);
       } else {

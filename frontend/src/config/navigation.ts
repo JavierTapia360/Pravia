@@ -2,7 +2,6 @@ import type { LucideIcon } from 'lucide-react';
 import {
   AlertTriangle,
   BarChart3,
-  BrainCircuit,
   Building2,
   Calendar,
   FileText,
@@ -59,9 +58,8 @@ export const navigationGroups: NavigationGroup[] = [
     ],
   },
   {
-    label: 'Herramientas',
+    label: 'Cumplimiento',
     items: [
-      { to: '/inteligencia', label: 'Inteligencia', description: 'Asistencia documental y operativa', icon: BrainCircuit, roles: ['DIRECCION', 'ADMINISTRACION', 'ABOGADO', 'CONSULTA'] },
       { to: '/riesgos', label: 'Riesgos / UIF', description: 'Alertas y cumplimiento', icon: AlertTriangle, roles: ['DIRECCION', 'ADMINISTRACION', 'ABOGADO', 'CONSULTA'] },
     ],
   },
@@ -69,6 +67,7 @@ export const navigationGroups: NavigationGroup[] = [
     label: 'Sistema',
     items: [
       { to: '/configuracion/usuarios', label: 'Usuarios y acceso', description: 'Cuentas, roles y sesiones', icon: Settings, roles: ['DIRECCION'] },
+      { to: '/inteligencia', label: 'Configuración IA', description: 'Modelos, consumo y observabilidad', icon: Settings, roles: ['DIRECCION', 'ADMINISTRACION'] },
     ],
   },
 ];

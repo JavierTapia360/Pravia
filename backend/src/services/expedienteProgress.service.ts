@@ -6,6 +6,11 @@ export interface CalculatedProgress {
   operativo: number;
   financiero: number;
   general: number;
+  configuration: {
+    documental: 'NO_CONFIGURADO' | 'EN_PROGRESO' | 'COMPLETO';
+    operativo: 'NO_CONFIGURADO' | 'EN_PROGRESO' | 'COMPLETO';
+    financiero: 'NO_CONFIGURADO' | 'EN_PROGRESO' | 'COMPLETO';
+  };
 }
 
 export async function calculateExpedienteProgress(expedienteId: string, tx?: Prisma.TransactionClient | PrismaClient) {
@@ -35,7 +40,13 @@ export class ExpedienteProgressService {
     });
 
     if (!expediente) {
-      return { documental: 0, operativo: 0, financiero: 0, general: 0 };
+      return {
+        documental: 0,
+        operativo: 0,
+        financiero: 0,
+        general: 0,
+        configuration: { documental: 'NO_CONFIGURADO', operativo: 'NO_CONFIGURADO', financiero: 'NO_CONFIGURADO' },
+      };
     }
 
     // 1. Avance Documental %
@@ -44,20 +55,27 @@ export class ExpedienteProgressService {
     if (reqsObligatorios.length > 0) {
       const validados = reqsObligatorios.filter(r => r.estatus === 'VALIDADO' || r.estatus === 'OMITIDO_JUSTIFICADO').length;
       avanceDoc = Math.round((validados / reqsObligatorios.length) * 100);
-    } else {
-      avanceDoc = 100;
     }
 
     // 2. Avance Operativo %
     let avanceOp = 0;
+    const frozenStages = Array.isArray(expediente.flujoVersion?.etapas_json)
+      ? expediente.flujoVersion.etapas_json as Array<Record<string, unknown>>
+      : [];
     const etapasCompletadas = expediente.etapas.filter(e => e.completada).length;
-    const totalEtapas = Math.max(expediente.etapas.length, 1);
-    avanceOp = Math.round((etapasCompletadas / totalEtapas) * 100);
+    const totalEtapas = frozenStages.length;
+    if (totalEtapas > 0) avanceOp = Math.round((Math.min(etapasCompletadas, totalEtapas) / totalEtapas) * 100);
 
     // 3. Avance Financiero %
     // Fórmula: min(100, max(0, (Ingresos Válidos Cobrados - Devoluciones / Total Exigible Cliente) * 100))
     let avanceFin = 0;
-    const totalExigible = Number(expediente.cotizacion?.total_cliente || expediente.valor_operacion || 0);
+    const datosOperacion = expediente.datos_operacion && typeof expediente.datos_operacion === 'object' && !Array.isArray(expediente.datos_operacion)
+      ? expediente.datos_operacion as Record<string, any>
+      : {};
+    const presupuesto = datosOperacion.presupuesto && typeof datosOperacion.presupuesto === 'object'
+      ? datosOperacion.presupuesto
+      : {};
+    const totalExigible = Number(presupuesto.total_cliente || presupuesto.total_notaria || expediente.cotizacion?.total_cliente || 0);
 
     if (totalExigible > 0) {
       const ingresosCobrados = expediente.movimientosFinancieros
@@ -70,8 +88,6 @@ export class ExpedienteProgressService {
 
       const netoIngreso = Math.max(0, ingresosCobrados - devoluciones);
       avanceFin = Math.min(100, Math.round((netoIngreso / totalExigible) * 100));
-    } else {
-      avanceFin = 100;
     }
 
     // 4. Avance General Ponderado %
@@ -91,7 +107,12 @@ export class ExpedienteProgressService {
       documental: Math.min(100, Math.max(0, avanceDoc)),
       operativo: Math.min(100, Math.max(0, avanceOp)),
       financiero: Math.min(100, Math.max(0, avanceFin)),
-      general: Math.min(100, Math.max(0, avanceGen))
+      general: Math.min(100, Math.max(0, avanceGen)),
+      configuration: {
+        documental: reqsObligatorios.length === 0 ? 'NO_CONFIGURADO' : avanceDoc >= 100 ? 'COMPLETO' : 'EN_PROGRESO',
+        operativo: totalEtapas === 0 ? 'NO_CONFIGURADO' : avanceOp >= 100 ? 'COMPLETO' : 'EN_PROGRESO',
+        financiero: totalExigible <= 0 ? 'NO_CONFIGURADO' : avanceFin >= 100 ? 'COMPLETO' : 'EN_PROGRESO',
+      },
     };
   }
 }

@@ -12,6 +12,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', async () => {
     const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    void registration.update();
     registration.addEventListener('updatefound', () => {
       const worker = registration.installing;
       worker?.addEventListener('statechange', () => {
@@ -20,6 +21,11 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
         }
       });
     });
-    navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
+    let reloadingForUpdate = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!navigator.serviceWorker.controller || reloadingForUpdate) return;
+      reloadingForUpdate = true;
+      window.location.reload();
+    });
   });
 }

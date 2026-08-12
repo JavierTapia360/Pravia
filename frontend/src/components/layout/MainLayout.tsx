@@ -14,6 +14,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { isAppRole, navigationForRole, roleLabels } from '../../config/navigation';
 import type { AppRole } from '../../config/navigation';
 import { miDiaService } from '../../services/miDia.service';
+import { PraviaAssistant } from '../ai/PraviaAssistant';
 
 export default function MainLayout() {
   const { user, logout } = useAuthStore();
@@ -213,6 +214,7 @@ export default function MainLayout() {
           <Outlet />
         </main>
       </div>
+      <PraviaAssistant />
     </div>
   );
 }

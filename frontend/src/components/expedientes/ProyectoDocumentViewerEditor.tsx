@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { renderAsync } from 'docx-preview';
 import { ArrowLeft, ZoomIn, ZoomOut, RotateCcw, Upload, Download, FileText } from 'lucide-react';
+import { api } from '../../services/api';
+import { useToastStore } from '../../stores/toastStore';
 
 interface Props {
   expedienteId: string;
@@ -9,6 +11,7 @@ interface Props {
 }
 
 export const ProyectoDocumentViewerEditor: React.FC<Props> = ({ expedienteId, versionId, onClose }) => {
+  const { addToast } = useToastStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState<number>(100);
   const [loading, setLoading] = useState<boolean>(true);
@@ -24,8 +27,8 @@ export const ProyectoDocumentViewerEditor: React.FC<Props> = ({ expedienteId, ve
   const loadDocxFile = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/expedientes/${expedienteId}/proyecto/versions/${versionId}/visualizar`);
-      if (res.ok && containerRef.current) {
+      const res = await api.response(`/expedientes/${expedienteId}/proyecto/versions/${versionId}/visualizar`);
+      if (containerRef.current) {
         const buffer = await res.arrayBuffer();
         containerRef.current.innerHTML = '';
         await renderAsync(buffer, containerRef.current, undefined, {
@@ -48,7 +51,7 @@ export const ProyectoDocumentViewerEditor: React.FC<Props> = ({ expedienteId, ve
 
   const handleUploadNewVersion = async () => {
     if (!versionFile) {
-      alert('Selecciona el archivo .docx real que deseas registrar como nueva versión.');
+      addToast('Selecciona el archivo .docx real que deseas registrar como nueva versión.', 'warning');
       return;
     }
 
@@ -58,25 +61,26 @@ export const ProyectoDocumentViewerEditor: React.FC<Props> = ({ expedienteId, ve
       formData.append('file', versionFile);
       formData.append('nota_version', notaVersion || `Nueva versión cargada: ${versionFile.name}`);
 
-      const res = await fetch(`/api/expedientes/${expedienteId}/proyecto/upload`, {
-        method: 'POST',
-        body: formData
-      });
-
-      if (res.ok) {
-        setShowSaveModal(false);
-        setVersionFile(null);
-        alert('¡Nueva versión del proyecto cargada con éxito! La versión anterior fue conservada intacta.');
-        onClose();
-      } else {
-        const errorData = await res.json().catch(() => ({}));
-        alert(errorData.detail || errorData.error || 'Error al cargar la nueva versión.');
-      }
+      await api.upload(`/expedientes/${expedienteId}/proyecto/upload`, formData);
+      setShowSaveModal(false);
+      setVersionFile(null);
+      addToast('Nueva versión cargada. La versión anterior se conservó intacta.', 'success');
+      onClose();
     } catch (e) {
-      alert('Error de conexión al cargar la nueva versión.');
+      addToast('No fue posible cargar la nueva versión.', 'error');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleDownload = async () => {
+    const blob = await api.blob(`/expedientes/${expedienteId}/proyecto/versions/${versionId}/descargar`);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'proyecto.docx';
+    anchor.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -118,14 +122,14 @@ export const ProyectoDocumentViewerEditor: React.FC<Props> = ({ expedienteId, ve
           </div>
 
           {/* Descargar .docx */}
-          <a
-            href={`/api/expedientes/${expedienteId}/proyecto/versions/${versionId}/descargar`}
-            download
+          <button
+            type="button"
+            onClick={() => void handleDownload()}
             className="flex items-center gap-1.5 bg-dark-bg hover:bg-dark-border text-gold border border-gold/30 text-xs font-bold px-3 py-1.5 rounded-xl transition-all"
           >
             <Download size={14} />
             Descargar
-          </a>
+          </button>
 
           {/* Cargar un .docx real como nueva versión */}
           <button

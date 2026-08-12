@@ -29,7 +29,7 @@ const getOperationalBudget = (exp: any) => {
   }
 
   return {
-    totalPresupuestado: toFiniteNumber(exp?.cotizacion?.total_cliente, toFiniteNumber(exp?.valor_operacion)),
+    totalPresupuestado: toFiniteNumber(exp?.cotizacion?.total_cliente),
     totalNotaria: toFiniteNumber(exp?.cotizacion?.total_notaria),
     participacionPravia: toFiniteNumber(exp?.cotizacion?.honorarios_pravia)
   };

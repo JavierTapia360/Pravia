@@ -41,6 +41,18 @@ export class DomainEventOutboxService {
 
     for (const outboxRecord of claimedEvents) {
       const handlers = DomainEventBus.getHandlers(outboxRecord.event_type);
+      if (handlers.length === 0) {
+        await this.prisma.domainEventOutbox.update({
+          where: { id: outboxRecord.id },
+          data: {
+            estatus: 'FALLIDO',
+            last_error: `NO_HANDLER_REGISTERED:${outboxRecord.event_type}`,
+            locked_at: null,
+            locked_by: null,
+          },
+        });
+        continue;
+      }
       let allHandlersSucceeded = true;
       let lastErrorMsg: string | null = null;
 

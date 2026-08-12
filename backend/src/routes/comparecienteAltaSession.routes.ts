@@ -2,12 +2,15 @@ import { Router } from 'express';
 import multer from 'multer';
 import { ComparecienteAltaSessionController } from '../controllers/comparecienteAltaSession.controller';
 import { requirePermission } from '../middleware/auth.middleware';
+import { requireAltaCargaObjectAccess, requireAltaSessionObjectAccess } from '../middleware/objectAccess.middleware';
 
 const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024 } // 25 MB max limit
 });
 
 const router = Router();
+router.param('sessionId', requireAltaSessionObjectAccess);
+router.param('cargaId', requireAltaCargaObjectAccess);
 
 // 1. GESTIÓN DE SESIONES (Soporta /, /altas, /session)
 router.post('/', ComparecienteAltaSessionController.iniciarSesion);

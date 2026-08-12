@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Upload, FileText, Trash2, Download, Loader2, Eye, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { useToastStore } from '../../stores/toastStore';
+import { useConfirmation } from '../ui/ConfirmDialog';
 
 interface Documento {
   id: string;
@@ -25,6 +26,7 @@ export function DocumentosTab({ prospectoId }: Props) {
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const toast = useToastStore();
+  const { requestConfirmation, confirmationDialog } = useConfirmation();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [uploadData, setUploadData] = useState<{ file: File | null; tipo: string; observaciones: string }>({
@@ -65,15 +67,7 @@ export function DocumentosTab({ prospectoId }: Props) {
       formData.append('tipo', uploadData.tipo);
       formData.append('observaciones', uploadData.observaciones);
       formData.append('prospecto_id', prospectoId);
-      
-      // We will hardcode user_id for now until we have real auth
-      const fakeUser = await api.get('/prospectos').then(res => res[0]?.atendido_por?.id || '8127559a-e44f-4f44-97de-cbebc68d7cd3').catch(() => '8127559a-e44f-4f44-97de-cbebc68d7cd3');
-      formData.append('user_id', fakeUser); 
-
-      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/documentos`, {
-        method: 'POST',
-        body: formData,
-      });
+      await api.upload('/documentos', formData);
 
       toast.add('Documento subido correctamente.', 'success');
       setUploadData({ file: null, tipo: '', observaciones: '' });
@@ -96,9 +90,15 @@ export function DocumentosTab({ prospectoId }: Props) {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('¿Estás seguro de eliminar este documento?')) return;
+    const accepted = await requestConfirmation({
+      title: 'Desvincular documento',
+      description: 'El documento dejará de aparecer en este prospecto. El archivo maestro y su trazabilidad se conservarán.',
+      confirmLabel: 'Desvincular',
+      tone: 'warning',
+    });
+    if (!accepted) return;
     try {
-      await api.delete(`/documentos/${id}`);
+      await api.delete(`/prospectos/${prospectoId}/documentos/${id}`);
       toast.add('Documento eliminado.', 'info');
       setDocumentos(prev => prev.filter(d => d.id !== id));
     } catch (error) {
@@ -202,6 +202,7 @@ export function DocumentosTab({ prospectoId }: Props) {
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
+      {confirmationDialog}
     </div>
   );
 }

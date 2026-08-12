@@ -1,14 +1,12 @@
 import { Request, Response } from 'express';
 import { ComparecienteService } from '../services/compareciente.service';
 import prisma from '../config/prisma';
+import { comparecienteObjectWhere } from '../services/objectAccess.service';
 
 const comparecienteService = new ComparecienteService(prisma);
 
-async function resolveActiveActor(req: Request, suppliedId?: string) {
-  const requestedId = (req as any).user?.id || suppliedId;
-  return requestedId
-    ? prisma.user.findFirst({ where: { id: requestedId, activo: true }, select: { id: true } })
-    : prisma.user.findFirst({ where: { activo: true }, orderBy: { created_at: 'asc' }, select: { id: true } });
+function authenticatedActor(req: Request) {
+  return req.user ? { id: req.user.id } : null;
 }
 
 export class ComparecienteController {
@@ -33,7 +31,8 @@ export class ComparecienteController {
         tipo_persona: tipo_persona as any,
         search: search as string,
         page: page ? parseInt(page as string, 10) : 1,
-        limit: limit ? parseInt(limit as string, 10) : 25
+        limit: limit ? parseInt(limit as string, 10) : 25,
+        accessWhere: req.user ? comparecienteObjectWhere(req.user) : undefined,
       });
       return res.status(200).json({ success: true, ...result });
     } catch (err: any) {
@@ -53,7 +52,7 @@ export class ComparecienteController {
 
   public static async crearPersonaFisica(req: Request, res: Response) {
     try {
-      const actor = await resolveActiveActor(req, req.body.creado_por_id);
+      const actor = authenticatedActor(req);
       if (!actor) {
         return res.status(401).json({ success: false, error: 'Usuario autenticado requerido' });
       }
@@ -70,7 +69,7 @@ export class ComparecienteController {
 
   public static async crearPersonaMoral(req: Request, res: Response) {
     try {
-      const actor = await resolveActiveActor(req, req.body.creado_por_id);
+      const actor = authenticatedActor(req);
       if (!actor) {
         return res.status(401).json({ success: false, error: 'Usuario autenticado requerido' });
       }
@@ -87,7 +86,7 @@ export class ComparecienteController {
 
   public static async vincularAExpediente(req: Request, res: Response) {
     try {
-      const actor = await resolveActiveActor(req, req.body.creado_por_id);
+      const actor = authenticatedActor(req);
       if (!actor) {
         return res.status(401).json({ success: false, error: 'Usuario autenticado requerido' });
       }
@@ -104,7 +103,7 @@ export class ComparecienteController {
 
   public static async validarVinculoExpediente(req: Request, res: Response) {
     try {
-      const actor = await resolveActiveActor(req, req.body.creado_por_id);
+      const actor = authenticatedActor(req);
       if (!actor) return res.status(401).json({ success: false, error: 'Usuario autenticado requerido' });
       if (typeof req.body.datos_validados !== 'boolean') {
         return res.status(400).json({ success: false, code: 'VALIDATION_STATUS_REQUIRED', error: 'Indica si los datos fueron validados.' });
@@ -123,7 +122,7 @@ export class ComparecienteController {
   public static async desvincularDeExpediente(req: Request, res: Response) {
     try {
       const { vinculoId } = req.params;
-      const actor = await resolveActiveActor(req, req.body.creado_por_id);
+      const actor = authenticatedActor(req);
       if (!actor) return res.status(401).json({ success: false, error: 'Usuario autenticado requerido' });
       const actualizado = await comparecienteService.desvincularDeExpediente(vinculoId, actor.id);
       return res.status(200).json({ success: true, data: actualizado });
@@ -164,7 +163,7 @@ export class ComparecienteController {
     try {
       const { id } = req.params;
       const file = req.file;
-      const actor = await resolveActiveActor(req, req.body.usuario_id);
+      const actor = authenticatedActor(req);
       const categoria = req.body.categoria || 'OTROS';
 
       if (!file) {
@@ -193,7 +192,7 @@ export class ComparecienteController {
   public static async archivarCompareciente(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const actor = await resolveActiveActor(req, req.body.usuario_id);
+      const actor = authenticatedActor(req);
       const { motivo } = req.body;
       if (!actor) return res.status(401).json({ success: false, error: 'Usuario autenticado requerido' });
 

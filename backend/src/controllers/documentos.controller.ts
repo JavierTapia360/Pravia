@@ -3,6 +3,7 @@ import prisma from '../config/prisma';
 import { uploadFile, getSignedUrl, deleteFile } from '../services/supabase.service';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
+import { canAttachDocumento } from '../services/objectAccess.service';
 
 /**
  * Subir un documento a Supabase Storage y crear registro en DB
@@ -22,7 +23,6 @@ export const uploadDocumento = async (req: Request, res: Response) => {
       cotizacion_id,
       expediente_id,
       compareciente_id,
-      user_id,
       observaciones
     } = req.body;
 
@@ -30,21 +30,16 @@ export const uploadDocumento = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'tipo de documento es requerido' });
     }
 
-    // Resolve valid subido_por_id UUID from DB
-    let validUserId = user_id;
-    if (!validUserId || typeof validUserId !== 'string' || validUserId.length !== 36) {
-      const defaultUser = await prisma.user.findFirst();
-      if (!defaultUser) {
-        return res.status(400).json({ error: 'No existe un usuario válido registrado para asignar el documento' });
-      }
-      validUserId = defaultUser.id;
-    } else {
-      const existingUser = await prisma.user.findUnique({ where: { id: validUserId } });
-      if (!existingUser) {
-        const defaultUser = await prisma.user.findFirst();
-        if (!defaultUser) return res.status(400).json({ error: 'Usuario no encontrado' });
-        validUserId = defaultUser.id;
-      }
+    const actorUserId = req.user?.id;
+    if (!actorUserId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
+    const targetAccess = await canAttachDocumento(req.user!, {
+      prospecto_id,
+      cotizacion_id,
+      expediente_id,
+      compareciente_id,
+    });
+    if (!targetAccess) {
+      return res.status(403).json({ error: 'No tienes acceso al expediente o catálogo de destino.', code: 'DOCUMENT_TARGET_ACCESS_DENIED' });
     }
 
     // Validate enum DocCategoria ('PROYECTO' | 'FIRMA')
@@ -66,7 +61,7 @@ export const uploadDocumento = async (req: Request, res: Response) => {
       mime_type: file.mimetype,
       size_bytes: file.size,
       observaciones: observaciones || null,
-      subido_por_id: validUserId,
+      subido_por_id: actorUserId,
       prospecto_id: prospecto_id || null,
       cotizacion_id: cotizacion_id || null,
       expediente_id: expediente_id || null,
@@ -76,12 +71,20 @@ export const uploadDocumento = async (req: Request, res: Response) => {
     console.log('DOCUMENTO DATA:', documentoData);
 
     try {
-      // Save metadata in DB
-      const documento = await prisma.documento.create({
-        data: documentoData,
-        include: {
-          subido_por: { select: { nombre: true } }
-        }
+      // Documento maestro + vínculos canónicos en una sola transacción.
+      const documento = await prisma.$transaction(async (tx) => {
+        const created = await tx.documento.create({ data: documentoData });
+        const common = { documento_id: created.id, creado_por_id: actorUserId, tipo_vinculo: tipo, estatus: 'ACTIVO' as const };
+        if (prospecto_id) await tx.prospectoDocumento.create({ data: { ...common, prospecto_id } });
+        if (cotizacion_id) await tx.cotizacionDocumento.create({ data: { ...common, cotizacion_id } });
+        if (expediente_id) await tx.expedienteDocumento.create({ data: { ...common, expediente_id } });
+        if (compareciente_id) await tx.comparecienteDocumento.create({
+          data: { compareciente_id, documento_id: created.id, categoria: 'OTROS', creado_por_id: actorUserId, estatus: 'ACTIVO' },
+        });
+        return tx.documento.findUniqueOrThrow({
+          where: { id: created.id },
+          include: { subido_por: { select: { nombre: true } } },
+        });
       });
 
       res.status(201).json(documento);
@@ -95,11 +98,11 @@ export const uploadDocumento = async (req: Request, res: Response) => {
         await deleteFile(nombre_interno).catch(delErr => console.error('Error al limpiar archivo huérfano:', delErr));
       }
 
-      res.status(500).json({ error: 'No se pudo registrar el presupuesto. El archivo no fue guardado. Intenta nuevamente.' });
+      res.status(500).json({ error: 'No se pudo registrar el documento. El archivo no fue guardado. Intenta nuevamente.' });
     }
   } catch (error: any) {
     console.error('Error en uploadDocumento:', error);
-    res.status(500).json({ error: 'No se pudo registrar el presupuesto. El archivo no fue guardado. Intenta nuevamente.' });
+    res.status(500).json({ error: 'No se pudo registrar el documento. El archivo no fue guardado. Intenta nuevamente.' });
   }
 };
 
@@ -134,6 +137,22 @@ export const getProspectoDocumentos = async (req: Request, res: Response) => {
     res.json(documentos);
   } catch (error: any) {
     res.status(500).json({ error: 'Error al listar documentos', detail: error.message });
+  }
+};
+
+export const unlinkProspectoDocumento = async (req: Request, res: Response) => {
+  try {
+    const { id, documentoId } = req.params;
+    await prisma.$transaction([
+      prisma.prospectoDocumento.updateMany({
+        where: { prospecto_id: id, documento_id: documentoId, estatus: 'ACTIVO' },
+        data: { estatus: 'INACTIVO', inactivado_at: new Date(), inactivado_por_id: req.user?.id },
+      }),
+      prisma.documento.updateMany({ where: { id: documentoId, prospecto_id: id }, data: { prospecto_id: null } }),
+    ]);
+    return res.json({ success: true, mensaje: 'Documento desvinculado del prospecto; el archivo maestro se conserva.' });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'No fue posible desvincular el documento.', detail: error.message });
   }
 };
 
@@ -175,21 +194,20 @@ export const deleteDocumento = async (req: Request, res: Response) => {
     const doc = await prisma.documento.findUnique({ where: { id } });
     if (!doc) return res.status(404).json({ error: 'Documento no encontrado' });
 
-    const hasOtherRelations = Boolean(doc.prospecto_id || doc.expediente_id || doc.compareciente_id);
-
-    if (hasOtherRelations && doc.cotizacion_id) {
-      // Desvincular de la cotización sin borrar archivo maestro
-      await prisma.documento.update({
-        where: { id },
-        data: { cotizacion_id: null }
-      });
-      res.status(200).json({ success: true, mensaje: 'Documento eliminado de la cotización.' });
-    } else {
-      // Eliminar archivo físico de Supabase y registro DB
-      await deleteFile(doc.storage_key).catch(e => console.warn('Supabase delete warning:', e));
-      await prisma.documento.delete({ where: { id } });
-      res.status(200).json({ success: true, mensaje: 'Documento eliminado correctamente.' });
+    if (doc.cotizacion_id) {
+      await prisma.$transaction([
+        prisma.cotizacionDocumento.updateMany({
+          where: { cotizacion_id: doc.cotizacion_id, documento_id: id, estatus: 'ACTIVO' },
+          data: { estatus: 'INACTIVO', inactivado_at: new Date(), inactivado_por_id: req.user?.id },
+        }),
+        prisma.documento.update({ where: { id }, data: { cotizacion_id: null } }),
+      ]);
+      return res.status(200).json({ success: true, mensaje: 'Documento desvinculado de la cotización; el archivo maestro se conserva.' });
     }
+    return res.status(409).json({
+      error: 'Para proteger archivos compartidos, desvincula el documento desde el expediente o catálogo correspondiente.',
+      code: 'DOCUMENT_CONTEXT_REQUIRED',
+    });
   } catch (error: any) {
     res.status(500).json({ error: 'Error al eliminar documento', detail: error.message });
   }

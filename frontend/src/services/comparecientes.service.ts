@@ -162,13 +162,12 @@ export const comparecientesService = {
     caracter_id: string;
     forma_comparecencia?: string;
     observaciones?: string;
-    creado_por_id?: string;
   }) => {
     return api.post('/comparecientes/vincular-expediente', data);
   },
 
-  desvincularDeExpediente: async (vinculoId: string, creado_por_id?: string) => {
-    return api.delete(`/comparecientes/vincular-expediente/${vinculoId}`, { creado_por_id });
+  desvincularDeExpediente: async (vinculoId: string) => {
+    return api.delete(`/comparecientes/vincular-expediente/${vinculoId}`);
   },
 
   validarVinculoExpediente: async (vinculoId: string, datos_validados: boolean) => {

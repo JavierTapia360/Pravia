@@ -19,6 +19,8 @@ import {
   validateMovementSemantics,
 } from '../domain/financialLedger';
 import { expedienteAccessWhere } from '../middleware/auth.middleware';
+import { reserveExpedienteFolio } from '../services/expedienteFolio.service';
+import { canAccessCotizacion } from '../services/objectAccess.service';
 
 const cotizacionConversionService = new CotizacionConversionService(prisma);
 
@@ -112,6 +114,7 @@ export const getExpedienteById = async (req: Request, res: Response) => {
       where: { id },
       include: {
         tipo_acto: true,
+        flujoVersion: true,
         abogado: { select: { id: true, nombre: true, apellido: true, email: true } },
         gestor: { select: { id: true, nombre: true, apellido: true } },
         creador: { select: { id: true, nombre: true, apellido: true } },
@@ -176,25 +179,27 @@ export const getExpedienteById = async (req: Request, res: Response) => {
     }
 
     const currentStageOrder = expediente.etapaActual?.orden_snapshot || 0;
-    const workflowStages = await prisma.flujoEtapa.findMany({
-      where: { tipo_acto_id: expediente.tipo_acto_id, activa: true },
-      select: {
-        clave: true,
-        nombre: true,
-        orden: true,
-        obligatoria: true,
-        se_puede_omitir: true,
-        duracion_esperada_dias: true,
-        estado_general_relacionado: true,
-      },
-      orderBy: { orden: 'asc' },
-    });
+    const frozenStages = Array.isArray(expediente.flujoVersion?.etapas_json)
+      ? expediente.flujoVersion.etapas_json as Array<Record<string, any>>
+      : [];
+    const workflowStages = frozenStages
+      .map((stage) => ({
+        clave: String(stage.clave || ''),
+        nombre: String(stage.nombre || ''),
+        orden: Number(stage.orden || 0),
+        obligatoria: stage.obligatoria !== false,
+        se_puede_omitir: stage.se_puede_omitir === true,
+        duracion_esperada_dias: Number(stage.duracion ?? stage.duracion_esperada_dias ?? 0) || null,
+        estado_general_relacionado: String(stage.estado || stage.estado_general_relacionado || ''),
+      }))
+      .sort((a, b) => a.orden - b.orden);
     const allowedStatuses = getAllowedExpedienteTransitions(expediente.estatus);
     const transitions = allowedStatuses.map((status) => ({
       status,
       label: EXPEDIENTE_STATUS_LABELS[status],
       stage: workflowStages.find((stage) => stage.estado_general_relacionado === status && stage.orden > currentStageOrder) || null,
       requires_signature_data: status === 'FIRMA_PROGRAMADA',
+      requires_effective_date: status === 'FIRMADO' || status === 'ENTREGADO',
       requires_notes: status === 'ENTREGADO' || status === 'CANCELADO' || status === 'SUSPENDIDO',
     }));
     const nextStage = workflowStages.find(
@@ -202,6 +207,7 @@ export const getExpedienteById = async (req: Request, res: Response) => {
     ) || null;
 
     const canReadFinance = req.user?.permissions.includes('finanzas.read');
+    const progress = await calculateExpedienteProgress(id);
     res.json({
       ...expediente,
       ...(canReadFinance ? {} : { valor_operacion: null, movimientosFinancieros: [], financial_access: false }),
@@ -211,6 +217,7 @@ export const getExpedienteById = async (req: Request, res: Response) => {
         next_stage: nextStage,
         stages: workflowStages,
       },
+      progress,
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Error al obtener detalle del expediente', detail: error.message });
@@ -230,7 +237,8 @@ export const createExpediente = async (req: Request, res: Response) => {
       datos_operacion
     } = req.body;
 
-    const creador_id = req.user?.id || abogado_id;
+    const creador_id = req.user?.id;
+    if (!creador_id) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
     const assignedLawyerId = req.user?.rol === 'ABOGADO' ? req.user.id : abogado_id;
 
     if (!tipo_acto_id || !assignedLawyerId || !cliente_alias) {
@@ -249,12 +257,8 @@ export const createExpediente = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'TipoActo no encontrado' });
     }
 
-    // Generar Número PRAVIA correlativo
-    const countAño = await prisma.expediente.count();
-    const añoActual = new Date().getFullYear();
-    const numero_pravia = `EXP-${añoActual}-${String(countAño + 1).padStart(4, '0')}`;
-
     const expediente = await prisma.$transaction(async (tx) => {
+      const numero_pravia = await reserveExpedienteFolio(tx);
       const exp = await tx.expediente.create({
         data: {
           numero_pravia,
@@ -334,12 +338,15 @@ export const createExpediente = async (req: Request, res: Response) => {
 // 4. Conversión de Cotización Aceptada a Expediente
 export const convertCotizacionToExpediente = async (req: Request, res: Response) => {
   try {
-    const { cotizacion_id, abogado_id, tipo_acto_id, user_id } = req.body;
+    const { cotizacion_id, abogado_id, tipo_acto_id } = req.body;
+    if (!req.user || !(await canAccessCotizacion(req.user, String(cotizacion_id)))) {
+      return res.status(403).json({ error: 'No tienes acceso a esta cotización.', code: 'COTIZACION_ACCESS_DENIED' });
+    }
     const result = await cotizacionConversionService.convert({
       cotizacionId: cotizacion_id,
       abogadoId: abogado_id,
       tipoActoId: tipo_acto_id,
-      actorUserId: (req as any).user?.id || user_id,
+      actorUserId: req.user?.id,
       correlationId: (req as any).correlationId,
     });
     res.status(result.alreadyConverted ? 200 : 201).json({
@@ -361,8 +368,8 @@ export const convertCotizacionToExpediente = async (req: Request, res: Response)
 export const transitionEstatus = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { expected_version, nuevo_estatus, nueva_etapa_clave, notas, datos_firma, user_id } = req.body;
-    const actor_user_id = (req as any).user?.id || user_id;
+    const { expected_version, nuevo_estatus, nueva_etapa_clave, notas, datos_firma, fecha_efectiva } = req.body;
+    const actor_user_id = req.user?.id;
 
     if (!actor_user_id) {
       return res.status(401).json({ error: 'Usuario no autenticado en la sesión' });
@@ -377,6 +384,7 @@ export const transitionEstatus = async (req: Request, res: Response) => {
       select: {
         tipo_acto_id: true,
         estatus: true,
+        flujoVersion: { select: { etapas_json: true } },
         etapaActual: { select: { orden_snapshot: true } },
       }
     });
@@ -389,17 +397,16 @@ export const transitionEstatus = async (req: Request, res: Response) => {
       || ['PENDIENTE_NOTARIA', 'FIRMA_PROGRAMADA', 'FIRMADO', 'POST_FIRMA', 'ENTREGADO'].includes(nuevo_estatus)
     );
     if (!resolvedStageKey && shouldResolveStage) {
-      const stage = await prisma.flujoEtapa.findFirst({
-        where: {
-          tipo_acto_id: current.tipo_acto_id,
-          activa: true,
-          estado_general_relacionado: nuevo_estatus,
-          orden: { gt: current.etapaActual?.orden_snapshot || 0 },
-        },
-        orderBy: { orden: 'asc' },
-        select: { clave: true },
-      });
-      resolvedStageKey = stage?.clave;
+      const frozenStages = Array.isArray(current.flujoVersion?.etapas_json)
+        ? current.flujoVersion.etapas_json as Array<Record<string, any>>
+        : [];
+      const stage = frozenStages
+        .filter((candidate) =>
+          String(candidate.estado || candidate.estado_general_relacionado || '') === nuevo_estatus
+          && Number(candidate.orden || 0) > (current.etapaActual?.orden_snapshot || 0),
+        )
+        .sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0))[0];
+      resolvedStageKey = stage?.clave ? String(stage.clave) : undefined;
     }
 
     let signatureData: TransicionPayload['datosFirma'];
@@ -414,6 +421,14 @@ export const transitionEstatus = async (req: Request, res: Response) => {
         autorizaSaldoPendiente: Boolean(datos_firma.autoriza_saldo_pendiente),
       };
     }
+    let effectiveDate: Date | undefined;
+    if (fecha_efectiva) {
+      effectiveDate = new Date(fecha_efectiva);
+      if (Number.isNaN(effectiveDate.getTime())) return res.status(400).json({ error: 'La fecha efectiva no es válida.' });
+      if (effectiveDate.getTime() > Date.now() + 5 * 60_000) {
+        return res.status(400).json({ error: 'La fecha efectiva de un hecho concluido no puede estar en el futuro.' });
+      }
+    }
 
     const workflowService = new ExpedienteWorkflowService(prisma);
     const expedienteActualizado = await workflowService.ejecutarTransicion({
@@ -424,6 +439,7 @@ export const transitionEstatus = async (req: Request, res: Response) => {
       actorUserId: actor_user_id,
       observaciones: notas,
       datosFirma: signatureData,
+      fechaEfectiva: effectiveDate,
     });
 
     res.json(expedienteActualizado);
@@ -462,7 +478,7 @@ function normalizarNaturaleza(nat?: string): NaturalezaMovimiento {
 }
 
 async function resolveActiveFinancialActor(req: Request) {
-  const actorId = (req as any).user?.id || req.body?.user_id;
+  const actorId = req.user?.id;
   if (!actorId) return null;
   return prisma.user.findFirst({ where: { id: actorId, activo: true }, select: { id: true } });
 }
@@ -688,7 +704,6 @@ export const updateExpedienteHeader = async (req: Request, res: Response) => {
       budget_items,
       honorarios_pravia,
       version: expectedVersion,
-      user_id,
     } = req.body;
     const cleanAlias = cliente_alias === undefined ? undefined : String(cliente_alias).trim();
     const cleanAbogadoId = abogado_id === undefined ? undefined : String(abogado_id).trim();
@@ -755,7 +770,8 @@ export const updateExpedienteHeader = async (req: Request, res: Response) => {
         if (!notary) throw new ExpedienteUpdateError('La notaría seleccionada no existe o está inactiva.', 'EXPEDIENTE_NOTARY_INVALID');
       }
 
-      const actorId = (req as any).user?.id || user_id || cleanAbogadoId || currentExp.abogado_id;
+      const actorId = req.user?.id;
+      if (!actorId) throw new ExpedienteUpdateError('Tu sesión no es válida.', 'AUTH_REQUIRED', 401);
       const actor = await tx.user.findFirst({ where: { id: actorId, activo: true }, select: { id: true } });
       if (!actor) throw new ExpedienteUpdateError('No existe un usuario activo para registrar el cambio.', 'EXPEDIENTE_ACTOR_INVALID', 403);
 
@@ -854,14 +870,9 @@ export const addExpedienteDocumento = async (req: Request, res: Response) => {
     const file = req.file;
     const { nombre, categoria, carpeta, observaciones } = req.body;
     
-    let userId = (req as any).user?.id || req.body.user_id;
+    const userId = req.user?.id;
     if (!userId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) userId = defaultUser.id;
-    }
-
-    if (!userId) {
-      return res.status(400).json({ error: 'No se encontró un usuario válido para registrar la actividad documental' });
+      return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
     }
 
     const exp = await prisma.expediente.findUnique({ where: { id } });
@@ -983,11 +994,8 @@ export const addExpedienteDocumento = async (req: Request, res: Response) => {
 export const deleteExpedienteDocumento = async (req: Request, res: Response) => {
   try {
     const { id, documentoId } = req.params;
-    let userId = (req as any).user?.id || req.body?.usuario_id;
-    if (!userId) {
-      const validUser = await prisma.user.findFirst();
-      if (validUser) userId = validUser.id;
-    }
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     const expDoc = await prisma.expedienteDocumento.findFirst({
       where: {
@@ -1005,21 +1013,19 @@ export const deleteExpedienteDocumento = async (req: Request, res: Response) => 
           data: {
             estatus: 'INACTIVO',
             inactivado_at: new Date(),
-            inactivado_por_id: userId || null
+            inactivado_por_id: userId
           }
         });
 
-        if (userId) {
-          await tx.expedienteActividad.create({
-            data: {
-              expediente_id: id,
-              tipo: 'DOCUMENTO',
-              titulo: `Documento "${expDoc.documento.nombre_original}" Eliminado del Archivo`,
-              descripcion: 'Documento retirado de la vista del expediente; el archivo se conserva internamente para auditoría.',
-              usuario_id: userId
-            }
-          });
-        }
+        await tx.expedienteActividad.create({
+          data: {
+            expediente_id: id,
+            tipo: 'DOCUMENTO',
+            titulo: `Documento "${expDoc.documento.nombre_original}" Eliminado del Archivo`,
+            descripcion: 'Documento retirado de la vista del expediente; el archivo se conserva internamente para auditoría.',
+            usuario_id: userId
+          }
+        });
       });
 
       return res.json({ success: true, message: 'Documento eliminado exitosamente' });
@@ -1034,17 +1040,15 @@ export const deleteExpedienteDocumento = async (req: Request, res: Response) => 
     await prisma.$transaction(async (tx) => {
       await tx.expedienteRequisitoDoc.delete({ where: { id: documentoId } });
 
-      if (userId) {
-        await tx.expedienteActividad.create({
-          data: {
-            expediente_id: id,
-            tipo: 'DOCUMENTO',
-            titulo: `Documento "${legacyDoc.nombre}" Eliminado del Archivo`,
-            descripcion: 'Registro documental heredado eliminado del expediente',
-            usuario_id: userId
-          }
-        });
-      }
+      await tx.expedienteActividad.create({
+        data: {
+          expediente_id: id,
+          tipo: 'DOCUMENTO',
+          titulo: `Documento "${legacyDoc.nombre}" Eliminado del Archivo`,
+          descripcion: 'Registro documental heredado eliminado del expediente',
+          usuario_id: userId
+        }
+      });
     });
 
     res.json({ success: true, message: 'Documento eliminado exitosamente' });
@@ -1059,11 +1063,8 @@ export const updateExpedienteDocumento = async (req: Request, res: Response) => 
     const { id, documentoId } = req.params;
     const { nombre, carpeta } = req.body;
 
-    let userId = (req as any).user?.id || req.body.user_id;
-    if (!userId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) userId = defaultUser.id;
-    }
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     const expDoc = await prisma.expedienteDocumento.findFirst({
       where: {

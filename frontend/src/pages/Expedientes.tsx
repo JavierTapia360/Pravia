@@ -23,32 +23,32 @@ export default function Expedientes() {
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-8 max-w-7xl mx-auto fade-in">
+    <div className="module-page expedientes-page fade-in">
       
       {/* HEADER PRINCIPAL DEL MÓDULO PRAVIA OS */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-2">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-gold/10 border border-gold/30 flex items-center justify-center text-gold shadow-md">
+      <div className="module-page-header">
+        <div className="module-page-header__identity">
+          <div className="module-page-header__icon">
             <Folder size={24} />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Módulo de Expedientes</h1>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-gold/10 text-gold border border-gold/20">
+              <h1 className="module-title">Módulo de Expedientes</h1>
+              <span className="badge badge-warning">
                 PRAVIA OS
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+            <p className="module-description">
               Centro operativo principal para la administración de procesos jurídicos, notariales y financieros
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 self-end sm:self-auto">
+        <div className="module-actions">
           <button
             onClick={() => fetchExpedientes()}
             title="Recargar Expedientes"
-            className="h-10 px-3.5 rounded-xl bg-slate-900 border border-white/10 text-slate-300 hover:text-white hover:border-gold/30 transition-all flex items-center gap-2 text-xs font-semibold shadow-sm"
+            className="btn btn-secondary btn-md"
           >
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
             <span>Actualizar Datos</span>
