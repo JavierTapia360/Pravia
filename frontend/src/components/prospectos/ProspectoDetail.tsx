@@ -131,7 +131,7 @@ export function ProspectoDetail({ prospecto, isOpen, onClose, onEdit, onArchive 
         </div>
       }
     >
-      <div style={{ padding: 'var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+      <div className="prospecto-detail-panel" style={{ padding: 'var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
         
         {/* Alerta de estancamiento */}
         {isStale && (
@@ -144,7 +144,7 @@ export function ProspectoDetail({ prospecto, isOpen, onClose, onEdit, onArchive 
         )}
 
         {/* Acciones rápidas */}
-        <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+        <div className="detail-actions" style={{ display: 'flex', gap: 'var(--space-3)' }}>
           <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setShowSeguimientoForm(true)}>
             <Plus size={16} /> Agregar Seguimiento
           </button>
@@ -186,7 +186,7 @@ export function ProspectoDetail({ prospecto, isOpen, onClose, onEdit, onArchive 
         </div>
 
         {/* Tabs Navegación */}
-        <div style={{ display: 'flex', gap: 'var(--space-4)', borderBottom: '1px solid var(--border-color)', marginTop: 'var(--space-2)' }}>
+        <div className="detail-tabs" style={{ display: 'flex', gap: 'var(--space-4)', borderBottom: '1px solid var(--border-color)', marginTop: 'var(--space-2)' }}>
           <button 
             onClick={() => setActiveTab('resumen')}
             style={{ padding: 'var(--space-2) 0', borderBottom: activeTab === 'resumen' ? '2px solid var(--color-primary)' : '2px solid transparent', color: activeTab === 'resumen' ? 'var(--color-primary)' : 'var(--text-secondary)', fontWeight: activeTab === 'resumen' ? 600 : 500, background: 'transparent', cursor: 'pointer', transition: 'all 0.2s' }}
@@ -210,7 +210,7 @@ export function ProspectoDetail({ prospecto, isOpen, onClose, onEdit, onArchive 
         {/* Tab Content */}
         {activeTab === 'resumen' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-            <div className="glass-card" style={{ padding: 'var(--space-4)' }}>
+            <div className="surface-card" style={{ padding: 'var(--space-4)' }}>
               <div style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: 'var(--space-4)' }}>Datos de Contacto</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
                 {detail.telefono && <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', fontSize: '0.9rem' }}><Phone size={16} className="text-muted" /> {detail.telefono}</div>}
@@ -227,7 +227,7 @@ export function ProspectoDetail({ prospecto, isOpen, onClose, onEdit, onArchive 
 
             {/* Necesidad / Descripción */}
             {detail.necesidad && (
-              <div className="glass-card" style={{ padding: 'var(--space-4)' }}>
+              <div className="surface-card" style={{ padding: 'var(--space-4)' }}>
                 <div style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: 'var(--space-2)' }}>Necesidad del Cliente</div>
                 <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}>
                   {detail.necesidad}

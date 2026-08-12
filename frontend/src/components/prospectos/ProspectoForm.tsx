@@ -86,9 +86,6 @@ export function ProspectoForm({ isOpen, onClose, onSubmit, initialData, isEditin
     }
   };
 
-  const fieldStyle = { marginBottom: 'var(--space-4)' };
-  const labelStyle = { display: 'block', marginBottom: 'var(--space-2)', fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 500 as const };
-
   return (
     <Modal
       isOpen={isOpen}
@@ -101,16 +98,15 @@ export function ProspectoForm({ isOpen, onClose, onSubmit, initialData, isEditin
             Cancelar
           </button>
           <button
-            className="btn btn-primary"
             form="prospecto-form"
             type="submit"
             disabled={isLoading || !form.nombre.trim()}
-            style={{ minWidth: '160px' }}
+            className="btn btn-primary modal-primary-action"
           >
             {isLoading ? (
               <>
-                <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
-                Guardando...
+                <Loader2 size={16} className="spinner" />
+                Guardando…
               </>
             ) : (
               isEditing ? 'Guardar Cambios' : 'Crear Prospecto'
@@ -120,29 +116,17 @@ export function ProspectoForm({ isOpen, onClose, onSubmit, initialData, isEditin
       }
     >
       {/* Error banner */}
-      {error && (
-        <div style={{
-          background: 'color-mix(in srgb, var(--color-danger) 12%, transparent)',
-          border: '1px solid var(--color-danger)',
-          borderRadius: 'var(--radius-md)',
-          padding: 'var(--space-3)',
-          marginBottom: 'var(--space-4)',
-          fontSize: '0.9rem',
-          color: 'var(--color-danger)',
-        }}>
-          {error}
-        </div>
-      )}
+      {error && <div className="form-alert" role="alert">{error}</div>}
 
-      <form id="prospecto-form" onSubmit={handleSubmit}>
+      <form id="prospecto-form" className="prospect-form" onSubmit={handleSubmit}>
         {/* Datos de Contacto */}
-        <h3 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 'var(--space-4)' }}>
+        <h3 className="form-section-title">
           Datos de Contacto
         </h3>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
-          <div style={fieldStyle}>
-            <label style={labelStyle}>Nombre *</label>
+        <div className="form-grid">
+          <div className="form-field">
+            <label className="input-label">Nombre *</label>
             <input
               type="text"
               className="input-field"
@@ -152,35 +136,35 @@ export function ProspectoForm({ isOpen, onClose, onSubmit, initialData, isEditin
               autoFocus
             />
           </div>
-          <div style={fieldStyle}>
-            <label style={labelStyle}>Teléfono</label>
+          <div className="form-field">
+            <label className="input-label">Teléfono</label>
             <input type="tel" className="input-field" value={form.telefono} onChange={e => handleChange('telefono', e.target.value)} placeholder="55 0000 0000" />
           </div>
-          <div style={fieldStyle}>
-            <label style={labelStyle}>Correo electrónico</label>
+          <div className="form-field">
+            <label className="input-label">Correo electrónico</label>
             <input type="email" className="input-field" value={form.email} onChange={e => handleChange('email', e.target.value)} placeholder="correo@ejemplo.com" />
           </div>
-          <div style={fieldStyle}>
-            <label style={labelStyle}>Ciudad</label>
+          <div className="form-field">
+            <label className="input-label">Ciudad</label>
             <input type="text" className="input-field" value={form.ciudad} onChange={e => handleChange('ciudad', e.target.value)} placeholder="Ciudad de México" />
           </div>
         </div>
 
         {/* Datos del Servicio */}
-        <h3 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 'var(--space-4) 0' }}>
+        <h3 className="form-section-title form-section-title--spaced">
           Datos del Servicio
         </h3>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
-          <div style={fieldStyle}>
-            <label style={labelStyle}>Tipo de Acto</label>
+        <div className="form-grid">
+          <div className="form-field">
+            <label className="input-label">Tipo de acto</label>
             <select className="input-field" value={form.tipo_acto} onChange={e => handleChange('tipo_acto', e.target.value)}>
               <option value="">Seleccionar...</option>
               {TIPOS_ACTO.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
-          <div style={fieldStyle}>
-            <label style={labelStyle}>Fuente del Prospecto</label>
+          <div className="form-field">
+            <label className="input-label">Fuente del prospecto</label>
             <select className="input-field" value={form.fuente} onChange={e => handleChange('fuente', e.target.value)}>
               <option value="">Seleccionar...</option>
               {FUENTES.map(f => <option key={f} value={f}>{f}</option>)}
@@ -188,8 +172,8 @@ export function ProspectoForm({ isOpen, onClose, onSubmit, initialData, isEditin
           </div>
         </div>
 
-        <div style={fieldStyle}>
-          <label style={labelStyle}>Necesidad / Descripción</label>
+        <div className="form-field">
+          <label className="input-label">Necesidad / descripción</label>
           <textarea
             className="input-field"
             rows={3}
@@ -201,14 +185,16 @@ export function ProspectoForm({ isOpen, onClose, onSubmit, initialData, isEditin
         </div>
 
         {/* Prioridad */}
-        <div style={fieldStyle}>
-          <label style={labelStyle}>Prioridad</label>
-          <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+        <div className="form-field">
+          <label className="input-label">Prioridad</label>
+          <div className="choice-row">
             {(['ALTA', 'MEDIA', 'BAJA'] as const).map(p => (
               <button
                 key={p}
                 type="button"
                 onClick={() => handleChange('prioridad', p)}
+                aria-pressed={form.prioridad === p}
+                className="choice-button"
                 style={{
                   flex: 1, padding: 'var(--space-2)',
                   borderRadius: 'var(--radius-md)',
@@ -234,12 +220,12 @@ export function ProspectoForm({ isOpen, onClose, onSubmit, initialData, isEditin
         </div>
 
         {/* Checks */}
-        <div style={{ display: 'flex', gap: 'var(--space-6)', marginTop: 'var(--space-4)' }}>
+        <div className="form-checks">
           {([
             { field: 'tiene_antecedente', label: '¿Tiene antecedente registral?' },
             { field: 'tiene_predial', label: '¿Tiene predial actualizado?' },
           ] as const).map(({ field, label }) => (
-            <label key={field} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer', fontSize: '0.9rem' }}>
+            <label key={field} className="check-label">
               <input
                 type="checkbox"
                 checked={!!form[field as keyof typeof form]}
@@ -251,9 +237,6 @@ export function ProspectoForm({ isOpen, onClose, onSubmit, initialData, isEditin
         </div>
       </form>
 
-      <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      `}</style>
     </Modal>
   );
 }

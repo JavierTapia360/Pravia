@@ -80,23 +80,23 @@ export const ProyectoDocumentViewerEditor: React.FC<Props> = ({ expedienteId, ve
   };
 
   return (
-    <div className="fixed inset-0 z-80 bg-dark-bg flex flex-col overflow-hidden text-white">
+    <div className="project-editor fixed inset-0 z-80 flex flex-col overflow-hidden">
       {/* BARRA DE NAVEGACIÓN SUPERIOR / TOPBAR INTEGRADA */}
-      <div className="bg-dark-card border-b border-dark-border p-3.5 flex items-center justify-between gap-4 shadow-md">
+      <div className="project-editor__toolbar">
         <div className="flex items-center gap-3">
           <button
             onClick={onClose}
-            className="flex items-center gap-2 text-xs font-bold text-muted hover:text-white bg-dark-bg/60 border border-dark-border px-3 py-1.5 rounded-xl transition-all"
+            className="btn btn-secondary btn-md"
           >
             <ArrowLeft size={16} />
             Volver al Expediente
           </button>
-          <div className="h-4 w-px bg-dark-border" />
+          <div className="project-viewer-divider" />
           <div className="flex items-center gap-2">
             <FileText size={18} className="text-gold" />
             <div>
-              <h3 className="text-sm font-bold text-white">Visor de Proyecto (.DOCX)</h3>
-              <p className="text-[10px] text-muted">Vista previa del documento; las nuevas versiones se cargan desde un archivo real</p>
+              <h3 className="text-base font-bold text-slate-950">Visor de proyecto (.DOCX)</h3>
+              <p className="text-[13px] text-slate-600">Vista previa del documento; las nuevas versiones se cargan desde un archivo real</p>
             </div>
           </div>
         </div>
@@ -104,15 +104,15 @@ export const ProyectoDocumentViewerEditor: React.FC<Props> = ({ expedienteId, ve
         {/* HERRAMIENTAS: ZOOM, DESCARGA Y CARGA DE VERSIÓN */}
         <div className="flex items-center gap-3">
           {/* Controles de Zoom */}
-          <div className="flex items-center gap-1 bg-dark-bg border border-dark-border rounded-xl p-1">
-            <button onClick={handleZoomOut} title="Alejar" className="p-1 text-muted hover:text-white rounded-lg">
+          <div className="segmented-control">
+            <button onClick={handleZoomOut} title="Alejar" className="icon-button">
               <ZoomOut size={15} />
             </button>
-            <span className="text-xs font-bold px-2 text-gold">{zoom}%</span>
-            <button onClick={handleZoomIn} title="Acercar" className="p-1 text-muted hover:text-white rounded-lg">
+            <span className="project-viewer-zoom">{zoom}%</span>
+            <button onClick={handleZoomIn} title="Acercar" className="icon-button">
               <ZoomIn size={15} />
             </button>
-            <button onClick={handleResetZoom} title="Restablecer" className="p-1 text-muted hover:text-white rounded-lg">
+            <button onClick={handleResetZoom} title="Restablecer" className="icon-button">
               <RotateCcw size={14} />
             </button>
           </div>
@@ -121,7 +121,7 @@ export const ProyectoDocumentViewerEditor: React.FC<Props> = ({ expedienteId, ve
           <a
             href={`/api/expedientes/${expedienteId}/proyecto/versions/${versionId}/descargar`}
             download
-            className="flex items-center gap-1.5 bg-dark-bg hover:bg-dark-border text-gold border border-gold/30 text-xs font-bold px-3 py-1.5 rounded-xl transition-all"
+            className="btn btn-secondary btn-md"
           >
             <Download size={14} />
             Descargar
@@ -130,20 +130,20 @@ export const ProyectoDocumentViewerEditor: React.FC<Props> = ({ expedienteId, ve
           {/* Cargar un .docx real como nueva versión */}
           <button
             onClick={() => setShowSaveModal(true)}
-            className="flex items-center gap-1.5 bg-gold hover:bg-gold-light text-dark-bg font-extrabold text-xs px-4 py-1.5 rounded-xl shadow-lg shadow-gold/10 transition-all"
+            className="btn btn-primary btn-md"
           >
             <Upload size={15} />
-            Cargar Nueva Versión
+            Cargar nueva versión
           </button>
         </div>
       </div>
 
       {/* ÁREA PRINCIPAL DEL DOCUMENTO CON CONSERVA DE ESTILOS */}
-      <div className="flex-1 overflow-auto p-6 bg-stone-900/90 flex justify-center">
+      <div className="project-editor__stage">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 space-y-3">
             <div className="w-8 h-8 border-4 border-gold border-t-transparent rounded-full animate-spin" />
-            <p className="text-sm font-semibold text-muted">Cargando y renderizando formato notarial...</p>
+            <p className="text-sm font-semibold text-slate-600">Cargando y renderizando formato notarial…</p>
           </div>
         ) : (
           <div
@@ -160,47 +160,47 @@ export const ProyectoDocumentViewerEditor: React.FC<Props> = ({ expedienteId, ve
 
       {/* MODAL PARA CARGAR NUEVA VERSIÓN */}
       {showSaveModal && (
-        <div className="fixed inset-0 z-90 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-dark-card border border-dark-border rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
-            <h4 className="text-base font-bold text-white flex items-center gap-2">
+        <div className="modal-backdrop fixed inset-0 z-90 flex items-center justify-center p-4">
+          <div className="surface-card w-full max-w-md p-6 space-y-4 shadow-xl">
+            <h4 className="text-lg font-bold text-slate-950 flex items-center gap-2">
               <Upload size={18} className="text-gold" />
               Cargar Nueva Versión
             </h4>
-            <p className="text-xs text-muted">
+            <p className="text-sm text-slate-600">
               Selecciona el archivo .docx ya corregido. Se agregará al historial sin sobrescribir la versión anterior.
             </p>
 
             <div>
-              <label className="block text-xs text-muted uppercase tracking-wider mb-2">Archivo DOCX</label>
+              <label className="input-label block mb-2">Archivo DOCX</label>
               <input
                 type="file"
                 accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 onChange={(event) => setVersionFile(event.target.files?.[0] || null)}
-                className="w-full bg-dark-bg border border-dark-border rounded-xl p-3 text-xs text-white file:mr-3 file:rounded-lg file:border-0 file:bg-gold file:px-3 file:py-1.5 file:font-bold file:text-dark-bg"
+                className="input-field w-full p-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-amber-700 file:px-3 file:py-1.5 file:font-bold file:text-white"
               />
             </div>
 
             <div>
-              <label className="block text-xs text-muted uppercase tracking-wider mb-2">Nota / Descripción de la Versión</label>
+              <label className="input-label block mb-2">Nota / descripción de la versión</label>
               <textarea
                 rows={3}
                 value={notaVersion}
                 onChange={(e) => setNotaVersion(e.target.value)}
                 placeholder="Ejemplo: V4 — Proyecto corregido por abogado tras revisión de datos"
-                className="w-full bg-dark-bg border border-dark-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-gold resize-none"
+                className="input-field w-full p-3 text-sm resize-none"
               />
             </div>
 
             <div className="flex justify-end gap-3 pt-2">
-              <button onClick={() => setShowSaveModal(false)} className="px-4 py-2 text-xs font-semibold text-muted hover:text-white">
+              <button onClick={() => setShowSaveModal(false)} className="btn btn-secondary">
                 Cancelar
               </button>
               <button
                 onClick={handleUploadNewVersion}
                 disabled={saving || !versionFile}
-                className="bg-gold text-dark-bg font-extrabold text-xs px-4 py-2 rounded-xl disabled:opacity-50 transition-all"
+                className="btn btn-primary disabled:opacity-50"
               >
-                {saving ? 'Cargando Versión...' : 'Confirmar y Cargar Nueva Versión'}
+                {saving ? 'Cargando versión…' : 'Confirmar y cargar nueva versión'}
               </button>
             </div>
           </div>

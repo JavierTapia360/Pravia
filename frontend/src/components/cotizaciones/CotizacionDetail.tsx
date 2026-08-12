@@ -582,7 +582,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
   // Loading Guard
   if (isLoading || !cotizacion) {
     return createPortal(
-      <div style={{
+      <div className="quote-detail-backdrop" style={{
         position: 'fixed',
         top: 0, left: 0, right: 0, bottom: 0,
         width: '100vw', height: '100vh',
@@ -592,7 +592,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
         display: 'flex',
         justifyContent: 'flex-end'
       }}>
-        <div style={{
+        <div className="quote-detail-panel" style={{
           width: 'min(980px, 100vw)',
           height: '100vh',
           backgroundColor: 'var(--bg-secondary)',
@@ -668,7 +668,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
   ];
 
   return createPortal(
-    <div style={{
+    <div className="quote-detail-backdrop" style={{
       position: 'fixed',
       top: 0, left: 0, right: 0, bottom: 0,
       width: '100vw', height: '100vh',
@@ -678,7 +678,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
       display: 'flex',
       justifyContent: 'flex-end'
     }}>
-      <div style={{
+      <div className="quote-detail-panel" style={{
         width: 'min(980px, 100vw)',
         height: '100vh',
         backgroundColor: 'var(--bg-secondary)',

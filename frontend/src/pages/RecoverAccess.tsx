@@ -33,7 +33,7 @@ export default function RecoverAccess() {
   };
 
   return <main className="auth-page">
-    <section className="glass-card auth-card" aria-labelledby="recovery-title">
+    <section className="surface-card auth-card" aria-labelledby="recovery-title">
       <div className="auth-icon">{token ? <ShieldCheck size={24} /> : <MailCheck size={24} />}</div>
       <p className="eyebrow">Acceso seguro</p>
       <h1 id="recovery-title">{token ? 'Restablecer contraseña' : 'Recuperar acceso'}</h1>
@@ -42,17 +42,17 @@ export default function RecoverAccess() {
         {token ? <>
           <label className="input-label" htmlFor="recovery-password">Nueva contraseña</label>
           <input id="recovery-password" className="input-field" type="password" autoComplete="new-password" minLength={12} value={password} onChange={(event) => setPassword(event.target.value)} required />
-          <label className="input-label" htmlFor="recovery-confirmation" style={{ marginTop: 'var(--space-4)' }}>Confirmar contraseña</label>
+          <label className="input-label modal-field" htmlFor="recovery-confirmation">Confirmar contraseña</label>
           <input id="recovery-confirmation" className="input-field" type="password" autoComplete="new-password" minLength={12} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required />
         </> : <>
           <label className="input-label" htmlFor="recovery-email">Correo de la cuenta</label>
           <input id="recovery-email" className="input-field" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
         </>}
-        {message && <p role="status" className="badge badge-success" style={{ display: 'block', marginTop: 'var(--space-4)' }}>{message}</p>}
-        {error && <p role="alert" style={{ color: 'var(--color-danger)', marginTop: 'var(--space-4)' }}>{error}</p>}
-        <button className="btn btn-primary" type="submit" disabled={loading || Boolean(message)} style={{ width: '100%', marginTop: 'var(--space-5)' }}>{loading ? 'Procesando…' : token ? 'Guardar contraseña' : 'Enviar instrucciones'}</button>
+        {message && <p role="status" className="form-success">{message}</p>}
+        {error && <p role="alert" className="form-alert">{error}</p>}
+        <button className="btn btn-primary auth-submit" type="submit" disabled={loading || Boolean(message)}>{loading ? 'Procesando…' : token ? 'Guardar contraseña' : 'Enviar instrucciones'}</button>
       </form>
-      <p style={{ marginTop: 'var(--space-5)', textAlign: 'center' }}><Link to="/login">Volver a iniciar sesión</Link></p>
+      <p className="auth-back"><Link to="/login">Volver a iniciar sesión</Link></p>
     </section>
   </main>;
 }

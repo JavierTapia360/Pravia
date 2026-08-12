@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Search, Filter, Clock, AlertCircle, FileText, CheckCircle2, Building2, User, RefreshCw, Layers } from 'lucide-react';
+import { Plus, Search, Clock, AlertCircle, FileText, CheckCircle2, Building2, User, RefreshCw, Layers } from 'lucide-react';
 import { api } from '../services/api';
 import WizardCotizacion from '../components/cotizaciones/WizardCotizacion';
 import CotizacionDetail from '../components/cotizaciones/CotizacionDetail';
@@ -126,13 +126,14 @@ export default function Cotizaciones() {
   });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)', width: '100%', maxWidth: '100%' }}>
+    <div className="module-page cotizaciones-page">
 
       {/* ── A. ENCABEZADO ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-4)' }}>
+      <div className="module-page-header">
         <div>
-          <h1 style={{ fontSize: '1.75rem', margin: 0 }}>Centro de Cotizaciones</h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: 'var(--space-1)' }}>
+          <span className="module-eyebrow">Operación comercial</span>
+          <h1 className="module-title">Centro de Cotizaciones</h1>
+          <p className="module-description">
             Solicitudes a notaría, presupuestos y seguimiento comercial.
           </p>
         </div>
@@ -145,7 +146,7 @@ export default function Cotizaciones() {
             setIsWizardOpen(true);
           }}
           className="btn btn-primary"
-          style={{ height: '42px', padding: '0 var(--space-4)', whiteSpace: 'nowrap', cursor: 'pointer', zIndex: 10 }}
+          style={{ whiteSpace: 'nowrap' }}
         >
           <Plus size={18} />
           <span>Iniciar nueva cotización</span>
@@ -153,12 +154,12 @@ export default function Cotizaciones() {
       </div>
 
       {/* ── B. TARJETAS KPI (GRID RESPONSIVE 4 COLUMNAS) ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 'var(--space-4)' }}>
+      <div className="quote-kpi-grid">
         
         {/* KPI 1 */}
         <div 
           onClick={() => setSelectedEstado('BORRADOR')}
-          className="glass-card hover-bg-tertiary"
+          className="quote-stat-card hover-bg-tertiary"
           style={{ cursor: 'pointer', padding: 'var(--space-4)', borderColor: selectedEstado === 'BORRADOR' ? 'var(--color-primary)' : 'var(--border-color)' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase' }}>
@@ -174,7 +175,7 @@ export default function Cotizaciones() {
         {/* KPI 2 */}
         <div 
           onClick={() => setSelectedEstado('ENVIADA_NOTARIA')}
-          className="glass-card hover-bg-tertiary"
+          className="quote-stat-card hover-bg-tertiary"
           style={{ cursor: 'pointer', padding: 'var(--space-4)', borderColor: selectedEstado === 'ENVIADA_NOTARIA' ? 'var(--color-primary)' : 'var(--border-color)' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase' }}>
@@ -194,7 +195,7 @@ export default function Cotizaciones() {
         {/* KPI 3 */}
         <div 
           onClick={() => setSelectedEstado('PRESUPUESTO_RECIBIDO')}
-          className="glass-card hover-bg-tertiary"
+          className="quote-stat-card hover-bg-tertiary"
           style={{ cursor: 'pointer', padding: 'var(--space-4)', borderColor: selectedEstado === 'PRESUPUESTO_RECIBIDO' ? 'var(--color-primary)' : 'var(--border-color)' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase' }}>
@@ -210,7 +211,7 @@ export default function Cotizaciones() {
         {/* KPI 4 */}
         <div 
           onClick={() => setSelectedEstado('ENVIADA_CLIENTE')}
-          className="glass-card hover-bg-tertiary"
+          className="quote-stat-card hover-bg-tertiary"
           style={{ cursor: 'pointer', padding: 'var(--space-4)', borderColor: selectedEstado === 'ENVIADA_CLIENTE' ? 'var(--color-primary)' : 'var(--border-color)' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase' }}>
@@ -226,7 +227,7 @@ export default function Cotizaciones() {
         {/* KPI 5 */}
         <div 
           onClick={() => setSelectedEstado('EN_NEGOCIACION')}
-          className="glass-card hover-bg-tertiary"
+          className="quote-stat-card hover-bg-tertiary"
           style={{ cursor: 'pointer', padding: 'var(--space-4)', borderColor: selectedEstado === 'EN_NEGOCIACION' ? 'var(--color-primary)' : 'var(--border-color)' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase' }}>
@@ -242,7 +243,7 @@ export default function Cotizaciones() {
         {/* KPI 6 */}
         <div 
           onClick={() => setSelectedEstado('ACEPTADA')}
-          className="glass-card hover-bg-tertiary"
+          className="quote-stat-card hover-bg-tertiary"
           style={{ cursor: 'pointer', padding: 'var(--space-4)', borderColor: selectedEstado === 'ACEPTADA' ? 'var(--color-primary)' : 'var(--border-color)' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase' }}>
@@ -258,7 +259,7 @@ export default function Cotizaciones() {
         {/* KPI 7 */}
         <div 
           onClick={() => setSelectedEstado('RECHAZADA')}
-          className="glass-card hover-bg-tertiary"
+          className="quote-stat-card hover-bg-tertiary"
           style={{ cursor: 'pointer', padding: 'var(--space-4)', borderColor: selectedEstado === 'RECHAZADA' ? 'var(--color-primary)' : 'var(--border-color)' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase' }}>
@@ -274,7 +275,7 @@ export default function Cotizaciones() {
         {/* KPI 8 */}
         <div 
           onClick={() => setSelectedEstado('TODOS')}
-          className="glass-card hover-bg-tertiary"
+          className="quote-stat-card hover-bg-tertiary"
           style={{ cursor: 'pointer', padding: 'var(--space-4)', borderColor: selectedEstado === 'TODOS' ? 'var(--color-primary)' : 'var(--border-color)' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase' }}>
@@ -290,10 +291,10 @@ export default function Cotizaciones() {
       </div>
 
       {/* ── C. BARRA DE ACCIONES Y FILTROS ── */}
-      <div className="glass-panel" style={{ padding: 'var(--space-3) var(--space-4)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-3)' }}>
+      <div className="toolbar-card quote-toolbar">
         
         {/* Search */}
-        <div style={{ position: 'relative', flex: 1, minWidth: '240px' }}>
+        <div className="data-table-search quote-search">
           <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
             type="text"
@@ -306,7 +307,7 @@ export default function Cotizaciones() {
         </div>
 
         {/* Filters */}
-        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+        <div className="toolbar-group quote-filters">
           <select 
             value={selectedEstado} 
             onChange={e => setSelectedEstado(e.target.value)}
@@ -347,20 +348,20 @@ export default function Cotizaciones() {
       </div>
 
       {/* ── D. TABLA DE COTIZACIONES ── */}
-      <div className="glass-panel" style={{ overflow: 'hidden' }}>
-        <div style={{ overflowX: 'auto', width: '100%' }}>
+      <div className="data-surface">
+        <div className="data-table-scroll">
           {fetchError ? (
-            <div style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--color-danger)' }}>
+            <div className="state-panel state-panel--compact state-panel--error">
               <AlertCircle size={32} style={{ margin: '0 auto var(--space-2)' }} />
               <p>{fetchError}</p>
               <button onClick={fetchCotizaciones} className="btn btn-secondary" style={{ marginTop: 'var(--space-3)' }}>Reintentar</button>
             </div>
           ) : isLoading ? (
-            <div style={{ padding: 'var(--space-12)', textAlign: 'center', color: 'var(--text-muted)' }}>
+            <div className="state-panel state-panel--compact">
               <p>Cargando cotizaciones...</p>
             </div>
           ) : filtered.length === 0 ? (
-            <div style={{ padding: 'var(--space-12)', textAlign: 'center', color: 'var(--text-muted)' }}>
+            <div className="state-panel">
               <FileText size={40} style={{ margin: '0 auto var(--space-3)', opacity: 0.3 }} />
               <h3 style={{ fontSize: '1.1rem', margin: 0, color: 'var(--text-primary)' }}>No se encontraron cotizaciones</h3>
               <p style={{ fontSize: '0.85rem', marginTop: 'var(--space-1)' }}>
@@ -368,7 +369,7 @@ export default function Cotizaciones() {
               </p>
             </div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+            <table className="data-table quote-table">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', textAlign: 'left', fontSize: '0.75rem', textTransform: 'uppercase' }}>
                   <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Folio</th>

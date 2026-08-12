@@ -21,41 +21,19 @@ export function ToastContainer() {
   if (toasts.length === 0) return null;
 
   return (
-    <div style={{
-      position: 'fixed',
-      bottom: 'var(--space-6)',
-      right: 'var(--space-6)',
-      zIndex: 9999,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 'var(--space-3)',
-      pointerEvents: 'none',
-    }}>
+    <div className="toast-region">
       {toasts.map((t) => (
         <div
           key={t.id}
-          className="fade-in"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--space-3)',
-            padding: 'var(--space-3) var(--space-4)',
-            borderRadius: 'var(--radius-md)',
-            background: 'var(--bg-secondary)',
-            border: `1px solid ${COLORS[t.type]}`,
-            boxShadow: 'var(--shadow-lg)',
-            minWidth: '300px',
-            maxWidth: '450px',
-            pointerEvents: 'all',
-            color: 'var(--text-primary)',
-          }}
+          className="toast-message fade-in"
+          style={{ borderColor: COLORS[t.type] }}
         >
-          <div style={{ color: COLORS[t.type], flexShrink: 0 }}>{ICONS[t.type]}</div>
-          <div style={{ flex: 1, fontSize: '0.9rem', fontWeight: 500 }}>{t.message}</div>
+          <div className="toast-message__icon" style={{ color: COLORS[t.type] }}>{ICONS[t.type]}</div>
+          <div className="toast-message__copy">{t.message}</div>
           <button
             onClick={() => remove(t.id)}
             className="btn-icon"
-            style={{ padding: '2px', flexShrink: 0 }}
+            aria-label="Cerrar notificación"
           >
             <X size={16} />
           </button>

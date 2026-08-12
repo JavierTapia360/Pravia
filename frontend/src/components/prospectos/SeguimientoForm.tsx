@@ -9,11 +9,11 @@ interface SeguimientoFormProps {
 }
 
 const TIPOS = [
-  { value: 'llamada', label: '📞 Llamada' },
-  { value: 'whatsapp', label: '💬 WhatsApp' },
-  { value: 'email', label: '📧 Correo' },
-  { value: 'reunion', label: '🤝 Reunión' },
-  { value: 'nota', label: '📝 Nota interna' },
+  { value: 'llamada', label: 'Llamada' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'email', label: 'Correo' },
+  { value: 'reunion', label: 'Reunión' },
+  { value: 'nota', label: 'Nota interna' },
 ];
 
 export function SeguimientoForm({ isOpen, onClose, onSubmit, prospectoNombre }: SeguimientoFormProps) {
@@ -32,8 +32,6 @@ export function SeguimientoForm({ isOpen, onClose, onSubmit, prospectoNombre }: 
     onClose();
   };
 
-  const labelStyle = { display: 'block', marginBottom: 'var(--space-2)', fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 500 };
-
   return (
     <Modal
       isOpen={isOpen}
@@ -47,17 +45,19 @@ export function SeguimientoForm({ isOpen, onClose, onSubmit, prospectoNombre }: 
         </>
       }
     >
-      <form id="seguimiento-form" onSubmit={handleSubmit}>
+      <form id="seguimiento-form" className="prospect-form" onSubmit={handleSubmit}>
         
         {/* Tipo */}
-        <div style={{ marginBottom: 'var(--space-4)' }}>
-          <label style={labelStyle}>Tipo de contacto</label>
-          <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+        <div className="form-field">
+          <label className="input-label">Tipo de contacto</label>
+          <div className="choice-row choice-row--wrap">
             {TIPOS.map(t => (
               <button
                 key={t.value}
                 type="button"
                 onClick={() => setForm(prev => ({ ...prev, tipo: t.value }))}
+                aria-pressed={form.tipo === t.value}
+                className="choice-button choice-button--compact"
                 style={{
                   padding: 'var(--space-2) var(--space-3)',
                   borderRadius: 'var(--radius-md)',
@@ -76,8 +76,8 @@ export function SeguimientoForm({ isOpen, onClose, onSubmit, prospectoNombre }: 
         </div>
 
         {/* Comentario */}
-        <div style={{ marginBottom: 'var(--space-4)' }}>
-          <label style={labelStyle}>Comentario *</label>
+        <div className="form-field">
+          <label className="input-label">Comentario *</label>
           <textarea
             className="input-field"
             rows={4}
@@ -90,8 +90,8 @@ export function SeguimientoForm({ isOpen, onClose, onSubmit, prospectoNombre }: 
         </div>
 
         {/* Próxima acción */}
-        <div style={{ marginBottom: 'var(--space-4)' }}>
-          <label style={labelStyle}>Próxima acción (opcional)</label>
+        <div className="form-field">
+          <label className="input-label">Próxima acción (opcional)</label>
           <input
             type="text"
             className="input-field"
@@ -102,8 +102,8 @@ export function SeguimientoForm({ isOpen, onClose, onSubmit, prospectoNombre }: 
         </div>
 
         {/* Fecha próximo seguimiento */}
-        <div>
-          <label style={labelStyle}>Fecha del próximo seguimiento</label>
+        <div className="form-field">
+          <label className="input-label">Fecha del próximo seguimiento</label>
           <input
             type="date"
             className="input-field"

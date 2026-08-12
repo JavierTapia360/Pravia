@@ -113,12 +113,12 @@ export function DocumentosTab({ prospectoId }: Props) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+    <div className="prospect-documents">
       {/* Upload Zone */}
-      <div className="glass-card" style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Nuevo Documento</div>
+      <div className="surface-card prospect-upload">
+        <div className="form-section-title">Nuevo documento</div>
         
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
+        <div className="form-grid">
           <div>
             <select className="input-field" value={uploadData.tipo} onChange={e => setUploadData(p => ({ ...p, tipo: e.target.value }))}>
               <option value="">Seleccionar Tipo...</option>
@@ -130,7 +130,7 @@ export function DocumentosTab({ prospectoId }: Props) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+        <div className="prospect-upload__file">
           <input 
             type="file" 
             ref={fileInputRef} 
@@ -157,7 +157,7 @@ export function DocumentosTab({ prospectoId }: Props) {
 
       {/* List */}
       <div>
-        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 'var(--space-3)' }}>Documentos Adjuntos ({documentos.length})</div>
+        <div className="form-section-title">Documentos adjuntos ({documentos.length})</div>
         
         {isLoading ? (
           <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--text-muted)' }}>Cargando documentos...</div>
@@ -166,16 +166,16 @@ export function DocumentosTab({ prospectoId }: Props) {
             No hay documentos cargados en este prospecto.
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          <div className="prospect-document-list">
             {documentos.map(doc => (
-              <div key={doc.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'var(--space-3)', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+              <div key={doc.id} className="prospect-document-row">
+                <div className="prospect-document-row__identity">
                   <div style={{ width: 36, height: 36, borderRadius: 'var(--radius-sm)', background: 'color-mix(in srgb, var(--color-primary) 15%, transparent)', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <FileText size={18} />
                   </div>
                   <div>
                     <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)' }}>{doc.tipo}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div className="prospect-document-row__meta">
                       <span style={{ maxWidth: '150px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{doc.nombre_original}</span>
                       <span>•</span>
                       <span>{formatSize(doc.size_bytes)}</span>
@@ -184,7 +184,7 @@ export function DocumentosTab({ prospectoId }: Props) {
                     </div>
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+                <div className="prospect-document-row__actions">
                   <button className="btn-icon" onClick={() => handlePreview(doc)} title="Ver / Descargar">
                     <Eye size={16} />
                   </button>
@@ -198,10 +198,6 @@ export function DocumentosTab({ prospectoId }: Props) {
         )}
       </div>
 
-      <style>{`
-        .spin { animation: spin 1s linear infinite; }
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      `}</style>
     </div>
   );
 }

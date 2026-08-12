@@ -70,20 +70,20 @@ export default function Usuarios() {
     finally { setSaving(false); }
   };
 
-  return <div className="page-enter">
-    <header className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-4)' }}>
+  return <div className="module-page users-page">
+    <header className="module-page-header">
       <div>
-        <p className="eyebrow">Configuración restringida</p>
-        <h1>Usuarios y acceso</h1>
-        <p className="text-muted">Altas, roles, activación y cierre de sesiones desde un único control.</p>
+        <span className="module-eyebrow">Configuración restringida</span>
+        <h1 className="module-title">Usuarios y acceso</h1>
+        <p className="module-description">Altas, roles, activación y cierre de sesiones desde un único control.</p>
       </div>
       <button className="btn btn-primary" type="button" onClick={() => setCreateOpen(true)}><Plus size={17} /> Nueva cuenta</button>
     </header>
 
-    <section className="glass-card" style={{ padding: 'var(--space-5)', marginTop: 'var(--space-5)' }}>
-      <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center', marginBottom: 'var(--space-5)' }}>
-        <span className="auth-icon" style={{ margin: 0 }}><ShieldCheck size={22} /></span>
-        <div><strong>Permisos efectivos en servidor</strong><p className="text-muted" style={{ margin: 0 }}>Los cambios de rol o desactivación cierran inmediatamente las sesiones existentes.</p></div>
+    <section className="surface-card users-surface">
+      <div className="users-notice">
+        <span className="users-notice__icon"><ShieldCheck size={22} /></span>
+        <div><strong>Permisos efectivos en servidor</strong><p>Los cambios de rol o desactivación cierran inmediatamente las sesiones existentes.</p></div>
       </div>
       {loading ? <LoadingState label="Cargando cuentas" rows={4} /> : error ? <ErrorState title="No se pudieron cargar las cuentas" description={error} retry={() => void load()} /> :
         <div className="users-grid">
@@ -112,19 +112,19 @@ export default function Usuarios() {
     </section>
 
     <Modal isOpen={createOpen} onClose={() => setCreateOpen(false)} title="Nueva cuenta" footer={<><button className="btn btn-secondary" onClick={() => setCreateOpen(false)}>Cancelar</button><button className="btn btn-primary" disabled={saving} onClick={() => void createUser()}>{saving ? 'Creando…' : 'Crear cuenta'}</button></>}>
-      <div className="form-grid">
-        <label className="input-label">Nombre<input className="input-field" value={form.nombre} onChange={(event) => setForm({ ...form, nombre: event.target.value })} /></label>
-        <label className="input-label">Apellido<input className="input-field" value={form.apellido} onChange={(event) => setForm({ ...form, apellido: event.target.value })} /></label>
+      <div className="form-grid modal-form-grid">
+        <label className="input-label">Nombre<input className="input-field" autoComplete="given-name" value={form.nombre} onChange={(event) => setForm({ ...form, nombre: event.target.value })} /></label>
+        <label className="input-label">Apellido<input className="input-field" autoComplete="family-name" value={form.apellido} onChange={(event) => setForm({ ...form, apellido: event.target.value })} /></label>
       </div>
-      <label className="input-label" style={{ marginTop: 'var(--space-4)' }}>Correo<input className="input-field" type="email" autoComplete="off" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
-      <label className="input-label" style={{ marginTop: 'var(--space-4)' }}>Rol<select className="input-field" value={form.rol} onChange={(event) => setForm({ ...form, rol: event.target.value as AppRole })}>{roles.map((role) => <option value={role.value} key={role.value}>{role.label}</option>)}</select></label>
-      <label className="input-label" style={{ marginTop: 'var(--space-4)' }}>Contraseña temporal<input className="input-field" type="password" autoComplete="new-password" value={form.initial_password} onChange={(event) => setForm({ ...form, initial_password: event.target.value })} /></label>
-      <p className="text-muted" style={{ fontSize: '0.82rem' }}>Mínimo 12 caracteres, mayúscula, minúscula, número y símbolo. El usuario deberá cambiarla al entrar.</p>
+      <label className="input-label modal-field">Correo<input className="input-field" type="email" autoComplete="off" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
+      <label className="input-label modal-field">Rol<select className="input-field" value={form.rol} onChange={(event) => setForm({ ...form, rol: event.target.value as AppRole })}>{roles.map((role) => <option value={role.value} key={role.value}>{role.label}</option>)}</select></label>
+      <label className="input-label modal-field">Contraseña temporal<input className="input-field" type="password" autoComplete="new-password" value={form.initial_password} onChange={(event) => setForm({ ...form, initial_password: event.target.value })} /></label>
+      <p className="form-help">Mínimo 12 caracteres, mayúscula, minúscula, número y símbolo. El usuario deberá cambiarla al entrar.</p>
     </Modal>
 
     <Modal isOpen={Boolean(passwordUser)} onClose={() => setPasswordUser(null)} title="Establecer contraseña temporal" footer={<><button className="btn btn-secondary" onClick={() => setPasswordUser(null)}>Cancelar</button><button className="btn btn-primary" disabled={saving || temporaryPassword.length < 12} onClick={() => void resetPassword()}>{saving ? 'Guardando…' : 'Guardar y cerrar sesiones'}</button></>}>
       <p>La cuenta de <strong>{passwordUser?.nombre} {passwordUser?.apellido}</strong> deberá cambiarla en el siguiente acceso.</p>
-      <label className="input-label">Nueva contraseña temporal<input className="input-field" type="password" autoComplete="new-password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} /></label>
+      <label className="input-label modal-field">Nueva contraseña temporal<input className="input-field" type="password" autoComplete="new-password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} /></label>
     </Modal>
   </div>;
 }

@@ -322,11 +322,11 @@ export default function NotariasList() {
           <p className="text-xs font-semibold">Cargando catálogo de notarías...</p>
         </div>
       ) : filteredNotarias.length > 0 ? (
-        <div className="notarias-grid grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <div className="notarias-grid grid gap-6">
           {filteredNotarias.map((n) => (
             <div
               key={n.id}
-              className={`bg-white border rounded-2xl p-6 space-y-5 shadow-sm transition-colors relative overflow-hidden flex flex-col justify-between min-h-[390px] ${
+              className={`bg-white border rounded-2xl p-6 space-y-5 shadow-sm transition-colors relative overflow-hidden flex flex-col ${
                 n.predeterminada 
                   ? 'border-amber-400 ring-1 ring-amber-200'
                   : n.activa
