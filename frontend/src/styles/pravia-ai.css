@@ -1,0 +1,138 @@
+/* PRAVIA IA — contextual layer. It stays independent from module layout and
+   never obscures the workspace unless the user deliberately opens it. */
+.pravia-assistant { position: relative; z-index: 850; }
+.pravia-ai-launcher {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 903;
+  width: 50px;
+  min-height: 50px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 1px solid rgb(214 180 122 / 0.75);
+  border-radius: var(--radius-full);
+  background: var(--pravia-navy-950);
+  color: #fff8ed;
+  box-shadow: 0 14px 34px rgb(8 19 38 / 0.24);
+  cursor: pointer;
+  transition: transform var(--duration-normal) ease, box-shadow var(--duration-normal) ease, background-color var(--duration-normal) ease;
+}
+.pravia-ai-launcher:hover { transform: translateY(-2px); background: var(--pravia-navy-900); box-shadow: 0 18px 38px rgb(8 19 38 / 0.3); }
+.pravia-ai-launcher img { width: 40px; height: 40px; object-fit: cover; object-position: center 30%; border-radius: 50%; }
+.pravia-assistant[data-open="true"] .pravia-ai-launcher { width: 48px; min-height: 48px; right: min(470px, calc(100vw - 58px)); padding: 0; }
+
+.pravia-ai-suggestion {
+  position: fixed;
+  right: 22px;
+  bottom: 90px;
+  z-index: 851;
+  width: min(350px, calc(100vw - 32px));
+  display: grid;
+  overflow: hidden;
+  border: 1px solid #ead8ba;
+  border-radius: var(--radius-lg);
+  background: #fffdf9;
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
+  animation: pravia-ai-arrive 220ms ease-out;
+}
+.pravia-ai-suggestion:hover { border-color: #d6b47a; }
+.pravia-ai-suggestion__main { position: relative; display: grid; gap: 3px; width: 100%; padding: var(--space-4) 42px var(--space-3) var(--space-4); border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.pravia-ai-suggestion__eyebrow { color: var(--color-accent); font-size: 0.6875rem; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+.pravia-ai-suggestion__main strong { font-family: "EB Garamond", Georgia, serif; font-size: 1.05rem; }
+.pravia-ai-suggestion__main > span:not(.pravia-ai-suggestion__eyebrow) { color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; }
+.pravia-ai-suggestion__main > svg { position: absolute; right: 16px; bottom: 16px; color: var(--color-accent); }
+.pravia-ai-suggestion__controls { display: flex; justify-content: flex-end; gap: var(--space-2); padding: 8px var(--space-3); border-top: 1px solid #f1e6d2; background: #fffaf2; }
+.pravia-ai-suggestion__controls button { min-height: 38px; padding: 0 11px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); font-size: 0.8125rem; font-weight: 800; cursor: pointer; }
+.pravia-ai-suggestion__controls button:hover { background: #f7ead5; color: var(--text-primary); }
+
+.pravia-ai-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 902;
+  width: min(440px, 100vw);
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  border-left: 1px solid var(--border-color);
+  background: var(--pravia-white);
+  box-shadow: -18px 0 48px rgb(8 19 38 / 0.18);
+  transform: translateX(105%);
+  visibility: hidden;
+  transition: transform 260ms cubic-bezier(0.4, 0, 0.2, 1), visibility 260ms;
+}
+.pravia-assistant[data-open="true"] .pravia-ai-panel { transform: translateX(0); visibility: visible; }
+.pravia-ai-backdrop { position: fixed; inset: 0; z-index: 901; border: 0; background: rgb(8 19 38 / 0.34); backdrop-filter: blur(2px); }
+.pravia-ai-header { min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--border-color); background: var(--pravia-navy-950); color: var(--text-inverse); }
+.pravia-ai-header .btn-icon { color: #cbd5e1; }
+.pravia-ai-header .btn-icon:hover { background: rgb(255 255 255 / 0.1); color: white; }
+.pravia-ai-identity { display: flex; align-items: center; gap: var(--space-3); }
+.pravia-ai-identity > div { display: grid; }
+.pravia-ai-identity span:not(.pravia-ai-avatar) { color: #91a2b8; font-size: 0.75rem; font-weight: 700; }
+.pravia-ai-identity strong { color: #fff8ed; font-family: "EB Garamond", Georgia, serif; font-size: 1.2rem; letter-spacing: 0.045em; }
+.pravia-ai-avatar { width: 52px; height: 52px; display: grid; place-items: center; overflow: hidden; border: 1px solid rgb(214 180 122 / 0.55); border-radius: 50%; background: #10213d; }
+.pravia-ai-avatar img { width: 48px; height: 48px; object-fit: cover; object-position: center 30%; }
+.pravia-ai-avatar--idle img { animation: pravia-ai-breathe 12s ease-in-out infinite; }
+.pravia-ai-avatar--blink img { animation: none; }
+.pravia-ai-avatar--thinking img { animation: pravia-ai-think 1.7s ease-in-out infinite; filter: drop-shadow(0 0 7px rgb(214 180 122 / 0.45)); }
+.pravia-ai-avatar--processing img { animation: pravia-ai-think 1.1s ease-in-out infinite; }
+.pravia-ai-context { min-height: 42px; display: flex; align-items: center; gap: var(--space-2); padding: 9px var(--space-5); border-bottom: 1px solid var(--border-color); background: #fff8ed; color: var(--pravia-copper-800); font-size: 0.75rem; }
+.pravia-ai-context span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pravia-ai-body { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-5); background: var(--pravia-slate-50); }
+.pravia-ai-message { padding: var(--space-5); border: 1px solid var(--border-color); border-radius: var(--radius-lg); background: var(--pravia-white); box-shadow: var(--shadow-sm); }
+.pravia-ai-message h2 { margin: 2px 0 var(--space-2); font-size: 1.25rem; }
+.pravia-ai-message p { color: var(--text-secondary); font-size: 0.875rem; line-height: 1.55; }
+.pravia-ai-message__label { margin-bottom: 2px; color: var(--color-accent) !important; font-size: 0.6875rem !important; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+.pravia-ai-message--result { border-color: #bfdbfe; background: #f8fbff; }
+.pravia-ai-source { display: block; margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid #dbeafe; color: #1e3a8a; font-size: 0.75rem; font-weight: 700; }
+.pravia-ai-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid #dbeafe; }
+.pravia-ai-sources > span { width: 100%; color: #1e3a8a; font-size: 0.6875rem; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; }
+.pravia-ai-sources button { min-height: 38px; display: inline-flex; align-items: center; gap: 5px; padding: 0 11px; border: 1px solid #bfdbfe; border-radius: 8px; background: white; color: #1d4ed8; font-size: 0.8125rem; font-weight: 800; cursor: pointer; }
+.pravia-ai-sources small { width: 100%; color: var(--text-muted); font-size: 0.6875rem; line-height: 1.4; }
+.pravia-ai-prepared { margin-top: var(--space-3); padding: var(--space-3); border: 1px solid #dbeafe; border-radius: var(--radius-md); background: white; }
+.pravia-ai-prepared dl { display: grid; gap: 7px; }
+.pravia-ai-prepared dl div { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 8px; }
+.pravia-ai-prepared dt { color: var(--text-muted); font-size: 0.75rem; font-weight: 700; }
+.pravia-ai-prepared dd { color: var(--text-primary); font-size: 0.8125rem; font-weight: 800; overflow-wrap: anywhere; }
+.pravia-ai-prepared > div { display: flex; flex-wrap: wrap; gap: 7px; margin-top: var(--space-3); }
+.pravia-ai-prepared button { min-height: 40px; display: inline-flex; align-items: center; gap: 5px; padding: 0 12px; border: 1px solid var(--border-color); border-radius: 9px; background: white; color: var(--text-primary); font-size: 0.8125rem; font-weight: 850; cursor: pointer; }
+.pravia-ai-prepared button:first-child { border-color: var(--color-accent); background: var(--color-accent); color: white; }
+.pravia-ai-prepared button:disabled { opacity: .55; cursor: wait; }
+.pravia-ai-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+.pravia-ai-actions button { min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: 0 var(--space-4); border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--pravia-white); color: var(--text-primary); font-size: 0.8125rem; font-weight: 800; cursor: pointer; }
+.pravia-ai-actions button:hover { border-color: #d6b47a; background: #fffdf9; }
+.pravia-ai-actions svg { color: var(--color-accent); }
+.pravia-ai-safety-note { padding: var(--space-4); border: 1px solid #fde68a; border-radius: var(--radius-md); background: #fffbeb; }
+.pravia-ai-safety-note strong { color: #92400e; font-size: 0.8125rem; }
+.pravia-ai-safety-note p { margin-top: 3px; color: #78350f; font-size: 0.75rem; line-height: 1.5; }
+.pravia-ai-footer { padding: var(--space-4) var(--space-5); border-top: 1px solid var(--border-color); background: var(--pravia-white); }
+.pravia-ai-composer label { display: block; margin-bottom: 6px; color: var(--text-secondary); font-size: 0.75rem; font-weight: 700; }
+.pravia-ai-composer > div { display: grid; grid-template-columns: minmax(0, 1fr) 42px; gap: var(--space-2); }
+.pravia-ai-composer input { min-width: 0; min-height: 42px; padding: 0 var(--space-3); border: 1px solid var(--input-border); border-radius: var(--radius-md); background: var(--pravia-white); color: var(--text-primary); font-size: 0.8125rem; }
+.pravia-ai-composer input:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-focus) 16%, transparent); }
+.pravia-ai-composer button { min-height: 42px; display: grid; place-items: center; border: 0; border-radius: var(--radius-md); background: var(--color-accent); color: white; cursor: pointer; }
+.pravia-ai-composer button:disabled { cursor: not-allowed; opacity: 0.45; }
+.pravia-ai-mode { position: relative; min-height: 38px; display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 7px; margin-top: var(--space-3); padding: 0 10px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--pravia-slate-50); color: var(--text-secondary); }
+.pravia-ai-mode > span { font-size: 0.75rem; font-weight: 700; }
+.pravia-ai-mode select { width: 100%; min-height: 36px; appearance: none; border: 0; background: transparent; color: var(--text-primary); font-size: 0.75rem; font-weight: 800; text-align: right; outline: none; cursor: pointer; }
+.pravia-ai-footer > a { display: inline-flex; align-items: center; gap: 5px; margin-top: var(--space-3); color: var(--text-secondary); font-size: 0.75rem; font-weight: 700; }
+
+@keyframes pravia-ai-arrive { from { opacity: 0; transform: translateY(8px); } }
+@keyframes pravia-ai-breathe { 0%, 58%, 100% { transform: scale(0.985) rotate(0); } 68% { transform: scale(1.015) rotate(0); } 76% { transform: scale(1.01) rotate(1.4deg); } 84% { transform: scale(0.99) rotate(0); } }
+@keyframes pravia-ai-think { 0%, 100% { transform: translateY(1px); } 50% { transform: translateY(-3px); } }
+
+@media (max-width: 620px) {
+  .pravia-ai-panel { width: 100vw; }
+  .pravia-ai-launcher { right: 14px; bottom: 14px; width: 48px; min-height: 48px; }
+  .pravia-ai-launcher img { width: 38px; height: 38px; }
+  .pravia-assistant[data-open="true"] .pravia-ai-launcher { top: 14px; right: 58px; bottom: auto; z-index: 904; background: transparent; box-shadow: none; }
+  .pravia-ai-suggestion { right: 14px; bottom: 78px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pravia-ai-panel, .pravia-ai-launcher, .pravia-ai-suggestion, .pravia-ai-avatar img { animation: none !important; transition-duration: 0.01ms !important; }
+}

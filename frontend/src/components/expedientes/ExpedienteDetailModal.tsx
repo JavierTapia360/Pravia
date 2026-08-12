@@ -8,6 +8,7 @@ import { useToastStore } from '../../stores/toastStore';
 import { ProyectoEscrituraIA } from './ProyectoEscrituraIA';
 import { ProyectoDocumentViewerEditor } from './ProyectoDocumentViewerEditor';
 import { ExpedienteFinanzasTab } from './ExpedienteFinanzasTab';
+import { useConfirmation } from '../ui/ConfirmDialog';
 
 interface Props {
   isOpen: boolean;
@@ -17,6 +18,7 @@ interface Props {
 export const ExpedienteDetailModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const { selectedExpediente, transitionEstatus, addMovimientoFinanciero, reverseMovimientoFinanciero, archiveExpediente } = useExpedienteStore();
   const { addToast } = useToastStore();
+  const { requestConfirmation, confirmationDialog } = useConfirmation();
 
   const [activeTab, setActiveTab] = useState<'etapas' | 'comparecientes' | 'documentos' | 'proyecto' | 'finanzas' | 'actividad' | 'tareas'>('etapas');
   const [expDocOriginFilter, setExpDocOriginFilter] = useState<'TODOS' | 'PROSPECTO' | 'COTIZACION' | 'EXPEDIENTE'>('TODOS');
@@ -101,7 +103,13 @@ export const ExpedienteDetailModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
   // Archivar Expediente
   const handleArchive = async () => {
-    if (!confirm('¿Confirmas que deseas archivar este expediente?')) return;
+    const accepted = await requestConfirmation({
+      title: 'Archivar expediente',
+      description: 'El expediente saldrá de la operación activa, pero su historial se conservará.',
+      confirmLabel: 'Archivar expediente',
+      tone: 'danger',
+    });
+    if (!accepted) return;
     try {
       await archiveExpediente(exp.id, 'Archivado manualmente por el usuario');
       addToast('Expediente archivado', 'success');
@@ -690,6 +698,7 @@ export const ExpedienteDetailModal: React.FC<Props> = ({ isOpen, onClose }) => {
           onClose={() => setViewerVersionId(null)}
         />
       )}
+      {confirmationDialog}
     </div>
   );
 };

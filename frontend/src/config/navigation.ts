@@ -2,7 +2,6 @@ import type { LucideIcon } from 'lucide-react';
 import {
   AlertTriangle,
   BarChart3,
-  BrainCircuit,
   Building2,
   Calendar,
   FileText,
@@ -45,7 +44,7 @@ export const navigationGroups: NavigationGroup[] = [
     items: [
       { to: '/prospectos', label: 'Prospectos', description: 'Contactos y seguimiento comercial', icon: Users, roles: ['DIRECCION', 'ADMINISTRACION', 'ABOGADO', 'RECEPCION'] },
       { to: '/cotizaciones', label: 'Cotizaciones', description: 'Presupuestos y aceptación', icon: FileText, roles: ['DIRECCION', 'ADMINISTRACION', 'ABOGADO', 'RECEPCION'] },
-      { to: '/expedientes', label: 'Expedientes', description: 'Centro operativo jurídico', icon: FolderOpen, roles: LEGAL_ROLES },
+      { to: '/expedientes', label: 'Expedientes', description: 'Centro operativo jurídico', icon: FolderOpen, roles: ALL_ROLES },
       { to: '/comparecientes', label: 'Comparecientes', description: 'Personas, perfiles y documentos', icon: UserSquare2, roles: ['DIRECCION', 'ADMINISTRACION', 'ABOGADO', 'CONSULTA'] },
       { to: '/notarias', label: 'Notarías', description: 'Directorio y coordinación notarial', icon: Building2, roles: ALL_ROLES },
     ],
@@ -59,9 +58,8 @@ export const navigationGroups: NavigationGroup[] = [
     ],
   },
   {
-    label: 'Herramientas',
+    label: 'Cumplimiento',
     items: [
-      { to: '/inteligencia', label: 'Inteligencia', description: 'Asistencia documental y operativa', icon: BrainCircuit, roles: ['DIRECCION', 'ADMINISTRACION', 'ABOGADO', 'CONSULTA'] },
       { to: '/riesgos', label: 'Riesgos / UIF', description: 'Alertas y cumplimiento', icon: AlertTriangle, roles: ['DIRECCION', 'ADMINISTRACION', 'ABOGADO', 'CONSULTA'] },
     ],
   },
@@ -69,6 +67,7 @@ export const navigationGroups: NavigationGroup[] = [
     label: 'Sistema',
     items: [
       { to: '/configuracion/usuarios', label: 'Usuarios y acceso', description: 'Cuentas, roles y sesiones', icon: Settings, roles: ['DIRECCION'] },
+      { to: '/inteligencia', label: 'Configuración IA', description: 'Modelos, consumo y observabilidad', icon: Settings, roles: ['DIRECCION', 'ADMINISTRACION'] },
     ],
   },
 ];

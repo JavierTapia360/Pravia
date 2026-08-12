@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { comparecientesService, calcularCalidadInformacion } from '../services/comparecientes.service';
 import { ModalNuevoCompareciente } from '../components/comparecientes/ModalNuevoCompareciente';
+import { ViewModeToggle, type ViewMode } from '../components/ui/ViewModeToggle';
 
 // ─── Modal de confirmación para archivar ────────────────────────────
 interface ModalArchivarProps {
@@ -56,6 +57,7 @@ function ModalArchivarCompareciente({ compareciente, onClose, onConfirm, procesa
           <button
             onClick={onClose}
             className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center transition-colors"
+            aria-label="Cerrar diálogo"
           >
             <X className="w-4 h-4 text-slate-500" />
           </button>
@@ -121,7 +123,11 @@ export default function Comparecientes() {
   const [search, setSearch] = useState('');
   const [filterTipo, setFilterTipo] = useState<string>('TODOS');
   const [total, setTotal] = useState(0);
-  const [page] = useState(1);
+  const [page, setPage] = useState(1);
+  const [viewMode, setViewMode] = useState<ViewMode>(() => (
+    localStorage.getItem('pravia_comparecientes_view') === 'cards' ? 'cards' : 'table'
+  ));
+  const pageSize = viewMode === 'table' ? 50 : 24;
 
   const [isModalNuevoOpen, setIsModalNuevoOpen] = useState(false);
   const [modalArchivar, setModalArchivar] = useState<any | null>(null);
@@ -130,13 +136,13 @@ export default function Comparecientes() {
 
   useEffect(() => {
     fetchData();
-  }, [search, filterTipo, page]);
+  }, [search, filterTipo, page, viewMode]);
 
   const fetchData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const params: any = { page, limit: 24, search };
+      const params: any = { page, limit: pageSize, search };
       if (filterTipo === 'FISICA' || filterTipo === 'MORAL') {
         params.tipo_persona = filterTipo;
       }
@@ -152,6 +158,14 @@ export default function Comparecientes() {
       setLoading(false);
     }
   };
+
+  const handleViewMode = (mode: ViewMode) => {
+    setViewMode(mode);
+    setPage(1);
+    localStorage.setItem('pravia_comparecientes_view', mode);
+  };
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const handleArchivar = async (motivo: string) => {
     if (!modalArchivar) return;
@@ -187,7 +201,7 @@ export default function Comparecientes() {
             ? <CheckCircle2 className="w-4 h-4" />
             : <AlertTriangle className="w-4 h-4" />}
           {feedbackMsg.texto}
-          <button onClick={() => setFeedbackMsg(null)} className="ml-2 hover:opacity-75">
+          <button onClick={() => setFeedbackMsg(null)} className="ml-2 min-h-10 min-w-10 rounded-lg hover:bg-white/15" aria-label="Cerrar notificación">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -240,7 +254,7 @@ export default function Comparecientes() {
             <UserCheck className="w-5 h-5" />
           </div>
           <div>
-            <p className="metric-label">Personas físicas</p>
+            <p className="metric-label">Físicas en esta página</p>
             <p className="mt-1 text-2xl font-bold text-slate-950">{totalFisicas}</p>
           </div>
         </div>
@@ -249,7 +263,7 @@ export default function Comparecientes() {
             <Building2 className="w-5 h-5" />
           </div>
           <div>
-            <p className="metric-label">Personas morales</p>
+            <p className="metric-label">Morales en esta página</p>
             <p className="mt-1 text-2xl font-bold text-slate-950">{totalMorales}</p>
           </div>
         </div>
@@ -257,7 +271,7 @@ export default function Comparecientes() {
 
       {/* 3. BÚSQUEDA Y FILTROS */}
       <div className="toolbar-card justify-between">
-        <div className="relative w-full md:max-w-xl md:flex-1">
+        <div className="relative w-full lg:max-w-xl lg:flex-1">
           <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
           <input
             type="text"
@@ -267,7 +281,7 @@ export default function Comparecientes() {
             className="control-height w-full rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-4 text-sm text-slate-900 placeholder-slate-500 outline-none focus:border-blue-800 focus:ring-2 focus:ring-blue-800/15"
           />
         </div>
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
           {(['TODOS', 'FISICA', 'MORAL'] as const).map(tipo => (
             <button
               key={tipo}
@@ -286,6 +300,7 @@ export default function Comparecientes() {
               {tipo === 'TODOS' ? 'Todos' : tipo === 'FISICA' ? 'Personas Físicas' : 'Personas Morales'}
             </button>
           ))}
+          <ViewModeToggle value={viewMode} onChange={handleViewMode} label="Vista de comparecientes" />
         </div>
       </div>
 
@@ -293,7 +308,7 @@ export default function Comparecientes() {
       {loading ? (
         <div className="py-16 text-center space-y-3">
           <div className="w-8 h-8 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-xs text-slate-400">Cargando directorio de comparecientes...</p>
+          <p className="text-sm text-slate-600">Cargando directorio de comparecientes...</p>
         </div>
       ) : error ? (
         <div className="p-6 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-sm text-center">
@@ -303,9 +318,75 @@ export default function Comparecientes() {
         <div className="py-16 text-center space-y-3 bg-white rounded-2xl border border-slate-200">
           <Users className="w-12 h-12 text-slate-300 mx-auto" />
           <h3 className="text-base font-bold text-slate-700">No se encontraron comparecientes.</h3>
-          <p className="text-xs text-slate-400 max-w-md mx-auto">
+          <p className="text-sm text-slate-600 max-w-md mx-auto">
             Utiliza el botón "+ Nuevo Compareciente" para registrar una Persona Física o Moral.
           </p>
+        </div>
+      ) : viewMode === 'table' ? (
+        <div className="data-surface">
+          <div className="data-table-scroll">
+            <table className="data-table min-w-[1040px]">
+              <thead>
+                <tr>
+                  <th>Compareciente</th>
+                  <th>Identificación</th>
+                  <th>Calidad</th>
+                  <th>Domicilio</th>
+                  <th>Expedientes</th>
+                  <th className="text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((c) => {
+                  const isFisica = c.tipo_persona === 'FISICA';
+                  const pf = c.personaFisica || c.persona_fisica;
+                  const pm = c.personaMoral || c.persona_moral;
+                  const nombre = isFisica ? (pf?.nombre_completo_calculado || c.nombre_busqueda) : (pm?.razon_social || c.nombre_busqueda);
+                  const rfc = isFisica ? pf?.rfc : pm?.rfc;
+                  const calidad = calcularCalidadInformacion(c);
+                  const domicilio = c.domicilios?.[0];
+                  return (
+                    <tr key={c.id}>
+                      <td className="max-w-[320px]">
+                        <button type="button" onClick={() => navigate(`/comparecientes/${c.id}`)} className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-800 rounded-lg">
+                          <span className="block font-extrabold leading-snug text-slate-950 hover:text-amber-800">{nombre}</span>
+                          <span className={`mt-1 inline-flex rounded-md px-2 py-0.5 text-[13px] font-bold ${isFisica ? 'bg-blue-50 text-blue-800' : 'bg-purple-50 text-purple-800'}`}>{isFisica ? 'Persona física' : 'Persona moral'}</span>
+                        </button>
+                      </td>
+                      <td>
+                        <span className="block font-mono font-bold text-slate-900">{rfc || 'Sin RFC'}</span>
+                        {isFisica && <span className="mt-1 block font-mono text-[13px] text-slate-600">{pf?.curp || 'Sin CURP'}</span>}
+                      </td>
+                      <td className="min-w-[150px]">
+                        <div className="flex items-center gap-3">
+                          <div className="h-2 w-20 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+                            <div className={`h-full ${calidad.porcentaje >= 85 ? 'bg-emerald-500' : calidad.porcentaje >= 60 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${calidad.porcentaje}%` }} />
+                          </div>
+                          <span className="font-bold tabular-nums">{calidad.porcentaje}%</span>
+                        </div>
+                      </td>
+                      <td className="max-w-[260px] text-slate-600">{domicilio ? `${domicilio.calle || ''} ${domicilio.exterior || ''}, ${domicilio.colonia || ''}` : 'Sin domicilio principal'}</td>
+                      <td><span className="font-bold tabular-nums">{c.expedientes?.length || 0}</span></td>
+                      <td>
+                        <div className="flex justify-end gap-2">
+                          <button type="button" onClick={() => setModalArchivar(c)} className="btn btn-secondary min-h-10 px-3" aria-label={`Archivar ${nombre}`}><Archive size={15} aria-hidden="true" /> Archivar</button>
+                          <button type="button" onClick={() => navigate(`/comparecientes/${c.id}`)} className="btn btn-primary min-h-10 px-3"><FolderOpen size={15} aria-hidden="true" /> Ver perfil</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="data-table-pagination">
+            <span>Mostrando {data.length} de {total} comparecientes</span>
+            <div className="data-table-pagination__controls">
+              <button type="button" className="btn btn-secondary min-h-10" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>Anterior</button>
+              <span>Página {page} de {totalPages}</span>
+              <button type="button" className="btn btn-secondary min-h-10" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Siguiente</button>
+            </div>
+          </div>
         </div>
       ) : (
         <div className="entity-grid">
@@ -433,6 +514,17 @@ export default function Comparecientes() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {viewMode === 'cards' && data.length > 0 && (
+        <div className="data-table-pagination rounded-2xl border border-slate-200">
+          <span>Mostrando {data.length} de {total} comparecientes</span>
+          <div className="data-table-pagination__controls">
+            <button type="button" className="btn btn-secondary min-h-10" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>Anterior</button>
+            <span>Página {page} de {totalPages}</span>
+            <button type="button" className="btn btn-secondary min-h-10" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Siguiente</button>
+          </div>
         </div>
       )}
 

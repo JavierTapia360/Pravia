@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
@@ -8,11 +9,20 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, Ta
 import Docxtemplater from 'docxtemplater';
 import PizZip from 'pizzip';
 import { Prisma } from '@prisma/client';
-import { deleteFile, downloadFile, uploadFile } from '../services/supabase.service';
+import { deleteFile, downloadFile, getStorageInfo, uploadFile } from '../services/supabase.service';
 import { analizarProyectoNotarialConOpenAI, DocumentoParaExtraccion } from '../services/openaiDocument.service';
 import { getOpenAIEscalationModelName } from '../services/openaiDocument.service';
 import { recordAIFailure, recordAIUsages } from '../services/aiUsage.service';
 import prisma from '../config/prisma';
+import { projectRepository } from '../services/projectRepository.service';
+
+function assertPersistentProjectStorage() {
+  if (getStorageInfo().primary !== 'cloud') {
+    const error: any = new Error('Los proyectos y reportes requieren el storage cloud persistente configurado.');
+    error.code = 'PROJECT_PERSISTENT_STORAGE_REQUIRED';
+    throw error;
+  }
+}
 
 const PROYECTOS_DIR = path.join(__dirname, '../../uploads/proyectos');
 const REPORTES_DIR = path.join(__dirname, '../../uploads/reportes_ia');
@@ -151,8 +161,9 @@ export const getProyectoEscritura = async (req: Request, res: Response) => {
       .filter(v => !vigente || v.id !== vigente.id)
       .sort((a, b) => b.version_numero - a.version_numero);
 
+    const persistentReport = await projectRepository.latestReport(id);
     const reportesExp = state.reportes.filter(r => r.expediente_id === id).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    const ultimoReporte = reportesExp.length > 0 ? reportesExp[0] : null;
+    const ultimoReporte = persistentReport?.record || (reportesExp.length > 0 ? reportesExp[0] : null);
 
     res.json({
       vigente,
@@ -182,8 +193,9 @@ export const uploadProyectoVersion = async (req: Request, res: Response) => {
         detail: 'La nueva versión debe ser un archivo .docx real.'
       });
     }
+    assertPersistentProjectStorage();
 
-    const userId = (req as any).user?.id || req.body.usuario_id;
+    const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Usuario autenticado requerido para cargar una versión.' });
     const [user, expediente] = await Promise.all([
       prisma.user.findFirst({ where: { id: userId, activo: true }, select: { id: true, nombre: true, apellido: true } }),
@@ -279,7 +291,7 @@ export const uploadProyectoVersion = async (req: Request, res: Response) => {
 export const updateProyectoVersion = async (req: Request, res: Response) => {
   try {
     const { id, versionId } = req.params;
-    const { accion, nuevo_nombre, nota_version, usuario_id } = req.body;
+    const { accion, nuevo_nombre, nota_version } = req.body;
 
     const databaseDocument = await prisma.documento.findFirst({
       where: { id: versionId, expediente_id: id, tipo: 'PROYECTO_ESCRITURA' },
@@ -289,7 +301,8 @@ export const updateProyectoVersion = async (req: Request, res: Response) => {
       }
     });
     if (databaseDocument) {
-      const actorId = (req as any).user?.id || usuario_id || databaseDocument.subido_por_id;
+      const actorId = req.user?.id;
+      if (!actorId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
       const actor = await prisma.user.findFirst({ where: { id: actorId, activo: true }, select: { id: true } });
       if (!actor) return res.status(403).json({ error: 'Usuario activo requerido para actualizar el proyecto.' });
       const currentMeta = projectMeta(databaseDocument);
@@ -423,10 +436,12 @@ export const analizarProyectoConIA = async (req: Request, res: Response) => {
   const aiStartedAt = Date.now();
   let aiRequestStarted = false;
   let usageUserId: string | undefined;
+  let uploadedReportKey: string | null = null;
   try {
     const { id } = req.params;
 
-    let userId = (req as any).user?.id || req.body.usuario_id;
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
     usageUserId = userId;
     let userName = 'Usuario no identificado';
 
@@ -535,8 +550,6 @@ export const analizarProyectoConIA = async (req: Request, res: Response) => {
     ]));
 
     const reportFileName = `Observaciones_IA_Expediente_${exp.numero_pravia.replace(/[^a-zA-Z0-9]/g, '_')}_V${vigente.version_numero}.docx`;
-    const reportPath = path.join(REPORTES_DIR, reportFileName);
-
     // Build Formatted Word .docx Report using 'docx' library
     const reportDoc = new Document({
       sections: [{
@@ -644,25 +657,47 @@ export const analizarProyectoConIA = async (req: Request, res: Response) => {
     });
 
     const reportBuffer = await Packer.toBuffer(reportDoc);
-    fs.writeFileSync(reportPath, reportBuffer);
-
-    const reportRecord: IAReportRecord = {
-      expediente_id: id,
-      proyecto_version_id: vigente.id,
-      proyecto_version_numero: vigente.version_numero,
-      nombre_reporte: `Observaciones IA - Expediente ${exp.numero_pravia.replace('EXP-', '')} - Proyecto V${vigente.version_numero}.docx`,
-      archivo_reporte_file: reportFileName,
-      documentos_analizados_count: documentosParaIA.length,
-      documentos_totales_count: docsActivos.length,
-      documentos_no_leidos: documentosNoLeidos,
-      observaciones,
-      solicitado_por: userName,
-      created_at: new Date().toISOString()
-    };
-
-    state.reportes = state.reportes.filter(r => r.expediente_id !== id);
-    state.reportes.push(reportRecord);
-    saveProyectosState(state);
+    assertPersistentProjectStorage();
+    uploadedReportKey = `expedientes/${id}/reportes-ia/${crypto.randomUUID()}_${reportFileName}`;
+    await uploadFile(reportBuffer, uploadedReportKey, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    const reportName = `Observaciones IA - Expediente ${exp.numero_pravia.replace('EXP-', '')} - Proyecto V${vigente.version_numero}.docx`;
+    const reportDocument = await prisma.$transaction(async (tx) => {
+      await tx.expedienteDocumento.updateMany({
+        where: { expediente_id: id, tipo_vinculo: 'REPORTE_IA_PROYECTO', estatus: 'ACTIVO' },
+        data: { estatus: 'SUSTITUIDO', inactivado_at: new Date(), inactivado_por_id: userId, motivo_inactivacion: 'Sustituido por un reporte de revisión más reciente' },
+      });
+      const document = await tx.documento.create({ data: {
+        nombre_original: reportName,
+        nombre_interno: uploadedReportKey!,
+        storage_key: uploadedReportKey!,
+        tipo: 'REPORTE_IA_PROYECTO',
+        categoria: 'PROYECTO',
+        mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        size_bytes: reportBuffer.length,
+        subido_por_id: userId,
+        expediente_id: id,
+        estatus: 'VIGENTE',
+        observaciones: `Revisión IA del proyecto V${vigente.version_numero}; requiere revisión humana.`,
+        datos_extraidos: { reporte_ia_proyecto: {
+          proyecto_version_id: vigente.id,
+          proyecto_version_numero: vigente.version_numero,
+          documentos_analizados_count: documentosParaIA.length,
+          documentos_totales_count: docsActivos.length,
+          documentos_no_leidos: documentosNoLeidos,
+          observaciones,
+          solicitado_por: userName,
+        } },
+      } });
+      await tx.expedienteDocumento.create({ data: {
+        expediente_id: id, documento_id: document.id, tipo_vinculo: 'REPORTE_IA_PROYECTO',
+        creado_por_id: userId, estatus: 'ACTIVO', observaciones: `Reporte IA sobre proyecto V${vigente.version_numero}`,
+      } });
+      return document;
+    });
+    uploadedReportKey = null;
+    const persistentReport = await projectRepository.latestReport(id);
+    const reportRecord = persistentReport?.record;
+    if (!reportRecord || reportRecord.id !== reportDocument.id) throw new Error('No fue posible verificar el reporte persistido.');
 
     // Audit activity
     if (userId) {
@@ -679,6 +714,7 @@ export const analizarProyectoConIA = async (req: Request, res: Response) => {
 
     res.status(201).json(reportRecord);
   } catch (error: any) {
+    if (uploadedReportKey) await deleteFile(uploadedReportKey).catch(() => undefined);
     if (aiRequestStarted) {
       await recordAIFailure({
         operacion: 'REVISION_PROYECTO_ESCRITURA',
@@ -697,6 +733,12 @@ export const analizarProyectoConIA = async (req: Request, res: Response) => {
 export const streamIAReport = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const persistent = await projectRepository.loadLatestReportBuffer(id);
+    if (persistent) {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(persistent.record.nombre_reporte)}"`);
+      return res.send(persistent.buffer);
+    }
     const state = loadProyectosState();
     const reportesExp = state.reportes.filter(r => r.expediente_id === id);
     const reporte = reportesExp.length > 0 ? reportesExp[reportesExp.length - 1] : null;
@@ -719,6 +761,12 @@ export const streamIAReport = async (req: Request, res: Response) => {
 export const downloadIAReport = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const persistent = await projectRepository.loadLatestReportBuffer(id);
+    if (persistent) {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(persistent.record.nombre_reporte)}"`);
+      return res.send(persistent.buffer);
+    }
     const state = loadProyectosState();
     const reportesExp = state.reportes.filter(r => r.expediente_id === id);
     const reporte = reportesExp.length > 0 ? reportesExp[reportesExp.length - 1] : null;
@@ -746,11 +794,8 @@ export const downloadCarpetaZip = async (req: Request, res: Response) => {
     const { id } = req.params;
     const carpetaQuery = (req.query.carpeta as string) || 'Todas';
 
-    let userId = (req as any).user?.id || req.body?.usuario_id;
-    if (!userId) {
-      const u = await prisma.user.findFirst();
-      if (u) userId = u.id;
-    }
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     const exp = await prisma.expediente.findUnique({
       where: { id },
@@ -1080,26 +1125,20 @@ export const getDatosDetectadosMatrix = async (req: Request, res: Response) => {
 
 // 11. GENERAR PROYECTO CON IA A PARTIR DE PLANTILLA PARAMETRIZADA
 export const generarProyectoConIA = async (req: Request, res: Response) => {
+  let uploadedProjectKey: string | null = null;
   try {
     const { id } = req.params;
-    const { matriz_confirmada, usuario_id } = req.body;
+    const { matriz_confirmada } = req.body;
 
-    let userId = (req as any).user?.id || usuario_id;
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
     let userName = 'Abogado Responsable';
-    if (userId) {
-      const u = await prisma.user.findUnique({ where: { id: userId } });
-      if (u) userName = u.nombre;
-    } else {
-      const u = await prisma.user.findFirst();
-      if (u) {
-        userId = u.id;
-        userName = u.nombre;
-      }
-    }
+    const u = await prisma.user.findUnique({ where: { id: userId } });
+    if (u) userName = u.nombre;
 
     const exp = await prisma.expediente.findUnique({
       where: { id },
-      include: { tipo_acto: true, notaria: true }
+      include: { tipo_acto: true, notaria: true, plantillaDocVersion: true }
     });
 
     if (!exp) return res.status(404).json({ error: 'Expediente no encontrado' });
@@ -1114,36 +1153,31 @@ export const generarProyectoConIA = async (req: Request, res: Response) => {
       });
     }
 
-    // Cargar plantilla notarial física real de 41.6 KB (~10 páginas)
-    const plantillasDir = path.join(__dirname, '../../uploads/plantillas');
-    const templatePath = path.join(plantillasDir, 'plantilla_compraventa_notaria4.docx');
-
-    // Validación de Notaría Asignada (Requerimiento 6 y 8)
-    const notariaAsignada = exp.notaria?.nombre || 'NOTARÍA PÚBLICA NO. 4';
-    if (!notariaAsignada.includes('4') && !notariaAsignada.toLowerCase().includes('cuatro')) {
+    assertPersistentProjectStorage();
+    const template = exp.plantillaDocVersion;
+    if (!template?.storage_key || !template.mime_type || !template.size_bytes || !template.activa) {
       return res.status(400).json({
         error: 'No existe una plantilla aprobada para esta Notaría y Tipo de Acto.',
-        detail: `La Notaría asignada (${notariaAsignada}) no coincide con la plantilla notarial de la Notaría Pública No. 4 de Nayarit.`
+        detail: 'El expediente no tiene una plantilla Word persistente, activa y versionada.'
       });
     }
-
-    if (!fs.existsSync(templatePath)) {
-      return res.status(400).json({
-        error: 'No existe una plantilla aprobada para esta Notaría y Tipo de Acto.',
-        detail: 'No se localizó el archivo maestro Word .docx en el servidor.'
-      });
+    if (template.notaria_id && template.notaria_id !== exp.notaria_id) {
+      return res.status(409).json({ error: 'La plantilla congelada no corresponde a la notaría asignada al expediente.', code: 'PROJECT_TEMPLATE_NOTARY_MISMATCH' });
     }
 
     const state = loadProyectosState();
-    const expVersiones = state.versiones.filter(v => v.expediente_id === id);
+    const databaseVersions = await projectRepository.listVersions(id);
+    const expVersiones = [...databaseVersions, ...state.versiones.filter(v => v.expediente_id === id)];
     const nextVersionNum = expVersiones.length > 0 ? Math.max(...expVersiones.map(v => v.version_numero)) + 1 : 1;
 
-    const timestamp = Date.now();
-    const newFilename = `Proyecto_${exp.numero_pravia.replace('-', '_')}_V${nextVersionNum}_IA_${timestamp}.docx`;
-    const targetFilePath = path.join(PROYECTOS_DIR, newFilename);
-
-    // Cargar copia binaria exacta del documento original de ~10 páginas
-    const content = fs.readFileSync(templatePath);
+    const newFilename = `Proyecto_${exp.numero_pravia.replace(/[^a-zA-Z0-9]/g, '_')}_V${nextVersionNum}.docx`;
+    const content = await downloadFile(template.storage_key);
+    if (content.length !== template.size_bytes) {
+      return res.status(409).json({ error: 'La plantilla persistente no coincide con el tamaño registrado.', code: 'PROJECT_TEMPLATE_SIZE_MISMATCH' });
+    }
+    if (template.checksum_sha256 && createHash('sha256').update(content).digest('hex') !== template.checksum_sha256) {
+      return res.status(409).json({ error: 'La integridad de la plantilla persistente no pudo verificarse.', code: 'PROJECT_TEMPLATE_CHECKSUM_MISMATCH' });
+    }
     const zip = await JSZip.loadAsync(content);
     let xml = await zip.file('word/document.xml')?.async('string');
 
@@ -1152,12 +1186,6 @@ export const generarProyectoConIA = async (req: Request, res: Response) => {
     }
 
     // Realizar sustitución sobre el XML manteniendo 100% de la estructura, 10 páginas, antecedente e inmutabilidad
-    xml = xml.replace(/PACIFIC SOLEIL/g, confirmedMap.vendedor || '[PENDIENTE DE CONFIRMAR]');
-    xml = xml.replace(/GABINO GONZALEZ MIRAMONTES/g, confirmedMap.comprador || exp.cliente_alias || '[PENDIENTE DE CONFIRMAR]');
-    xml = xml.replace(/U114328/g, confirmedMap.cuenta_predial || '[PENDIENTE DE CONFIRMAR]');
-    xml = xml.replace(/49\.02 m²/g, confirmedMap.superficie || '[PENDIENTE DE CONFIRMAR]');
-    xml = xml.replace(/\$157,782\.25/g, confirmedMap.precio || '[PENDIENTE DE CONFIRMAR]');
-
     xml = xml.replace(/\{\{\s*vendedor_nombre\s*\}\}/gi, confirmedMap.vendedor || '[PENDIENTE DE CONFIRMAR]');
     xml = xml.replace(/\{\{\s*comprador_nombre\s*\}\}/gi, confirmedMap.comprador || exp.cliente_alias || '[PENDIENTE DE CONFIRMAR]');
     xml = xml.replace(/\{\{\s*inmueble_predial\s*\}\}/gi, confirmedMap.cuenta_predial || '[PENDIENTE DE CONFIRMAR]');
@@ -1168,38 +1196,43 @@ export const generarProyectoConIA = async (req: Request, res: Response) => {
     zip.file('word/document.xml', xml);
     const outBuffer = await zip.generateAsync({ type: 'nodebuffer' });
 
-    // Validación comparativa (Requerimiento 8): El resultado debe preservar la extensión (~40KB, ~10 páginas)
-    if (outBuffer.byteLength < 30000) {
+    const generatedZip = await JSZip.loadAsync(outBuffer);
+    if (!generatedZip.file('word/document.xml') || Object.keys(generatedZip.files).length !== Object.keys(zip.files).length) {
       return res.status(400).json({
-        error: 'RECHAZADO POR VALIDACIÓN COMPARATIVA',
-        detail: `El proyecto generado perdió la estructura del modelo notarial (peso generado ${outBuffer.byteLength} bytes < 30,000 bytes).`
+        error: 'La validación estructural del proyecto generado falló.',
+        detail: 'El documento resultante no conservó la estructura interna de la plantilla versionada.'
       });
     }
 
-    fs.writeFileSync(targetFilePath, outBuffer);
-
-    // Desmarcar versiones vigentes anteriores
-    state.versiones.forEach(v => {
-      if (v.expediente_id === id) v.es_vigente = false;
+    uploadedProjectKey = `expedientes/${id}/proyectos/${crypto.randomUUID()}_${newFilename}`;
+    await uploadFile(outBuffer, uploadedProjectKey, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    const created = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:proyecto-version:${id}`}))`);
+      await tx.expedienteDocumento.updateMany({
+        where: { expediente_id: id, tipo_vinculo: 'PROYECTO_ESCRITURA', estatus: 'ACTIVO' },
+        data: { estatus: 'SUSTITUIDO', inactivado_at: new Date(), inactivado_por_id: userId, motivo_inactivacion: `Sustituido por V${nextVersionNum}` },
+      });
+      const document = await tx.documento.create({ data: {
+        nombre_original: `Proyecto_${exp.numero_pravia}_V${nextVersionNum}.docx`,
+        nombre_interno: uploadedProjectKey!, storage_key: uploadedProjectKey!, tipo: 'PROYECTO_ESCRITURA', categoria: 'PROYECTO',
+        mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size_bytes: outBuffer.length,
+        subido_por_id: userId, expediente_id: id, estatus: 'VIGENTE',
+        observaciones: `V${nextVersionNum} — BORRADOR GENERADO DESDE PLANTILLA — REQUIERE REVISIÓN`,
+        datos_extraidos: { proyecto: {
+          version_numero: nextVersionNum, es_version_final: false,
+          nota_version: `V${nextVersionNum} — BORRADOR GENERADO DESDE PLANTILLA — REQUIERE REVISIÓN`,
+          plantilla_documental_version_id: template.id,
+          plantilla_version: template.version,
+          plantilla_checksum_sha256: template.checksum_sha256,
+        } },
+      } });
+      await tx.expedienteDocumento.create({ data: { expediente_id: id, documento_id: document.id, tipo_vinculo: 'PROYECTO_ESCRITURA', creado_por_id: userId, estatus: 'ACTIVO', observaciones: `Proyecto vigente V${nextVersionNum}` } });
+      return document;
     });
-
-    const newVersion: ProyectoVersionRecord = {
-      id: `ver_${timestamp}`,
-      expediente_id: id,
-      version_numero: nextVersionNum,
-      nombre_original: `Proyecto_${exp.numero_pravia}_V${nextVersionNum}_IA.docx`,
-      archivo_file: newFilename,
-      mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      size_bytes: fs.statSync(targetFilePath).size,
-      es_vigente: true,
-      es_version_final: false,
-      nota_version: `V${nextVersionNum} — BORRADOR GENERADO CON IA – REQUIERE REVISIÓN`,
-      cargado_por_nombre: `${userName} (IA Motor)`,
-      created_at: new Date().toISOString()
-    };
-
-    state.versiones.push(newVersion);
-    saveProyectosState(state);
+    uploadedProjectKey = null;
+    const persisted = await projectRepository.getVersion(id, created.id);
+    if (!persisted) throw new Error('No fue posible verificar el proyecto persistido.');
+    const newVersion = persisted.record;
 
     if (userId) {
       await prisma.expedienteActividad.create({
@@ -1207,7 +1240,7 @@ export const generarProyectoConIA = async (req: Request, res: Response) => {
           expediente_id: id,
           tipo: 'AUDITORIA',
           titulo: `Generado Proyecto de Escritura con IA (V${nextVersionNum})`,
-          descripcion: `Proyecto V${nextVersionNum} generado a partir de plantilla notarial y matriz de datos confirmada. Estatus: BORRADOR GENERADO CON IA – REQUIERE REVISIÓN.`,
+          descripcion: `Proyecto V${nextVersionNum} generado con plantilla persistente ${template.id} y matriz confirmada. Requiere revisión profesional.`,
           usuario_id: userId
         }
       });
@@ -1218,6 +1251,7 @@ export const generarProyectoConIA = async (req: Request, res: Response) => {
       version: newVersion
     });
   } catch (error: any) {
+    if (uploadedProjectKey) await deleteFile(uploadedProjectKey).catch(() => undefined);
     res.status(500).json({ error: 'Error al generar proyecto con IA', detail: error.message });
   }
 };

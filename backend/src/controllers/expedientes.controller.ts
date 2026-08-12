@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { ExpedienteEstatus, TipoMovimiento, NaturalezaMovimiento, DocEstatus, DocCategoria, Prisma } from '@prisma/client';
+import { ExpedienteEstatus, TipoMovimiento, NaturalezaMovimiento, DocEstatus, DocCategoria, Prisma, TareaExternaEstatus, TipoTareaExterna } from '@prisma/client';
 import { ExpedienteWorkflowService, TransicionPayload } from '../services/expedienteWorkflow.service';
 import { calculateExpedienteProgress } from '../services/expedienteProgress.service';
 import { downloadFile, uploadFile, deleteFile } from '../services/supabase.service';
@@ -19,8 +19,42 @@ import {
   validateMovementSemantics,
 } from '../domain/financialLedger';
 import { expedienteAccessWhere } from '../middleware/auth.middleware';
+import { reserveExpedienteFolio } from '../services/expedienteFolio.service';
+import { canAccessCotizacion } from '../services/objectAccess.service';
 
 const cotizacionConversionService = new CotizacionConversionService(prisma);
+
+async function assertRequestExpedienteScope(req: Request, expedienteId: string) {
+  if (!req.user) throw new ExpedienteUpdateError('Inicia sesión para continuar.', 'AUTH_REQUIRED', 401);
+  const scoped = await prisma.expediente.findFirst({
+    where: { id: expedienteId, archived_at: null, ...expedienteAccessWhere(req.user) },
+    select: { id: true, estatus: true, version: true },
+  });
+  if (!scoped) throw new ExpedienteUpdateError('No tienes acceso a este expediente.', 'EXPEDIENTE_ACCESS_DENIED', 403);
+  return scoped;
+}
+
+async function resolveNextFrozenStage(expedienteId: string, target: ExpedienteEstatus) {
+  const current = await prisma.expediente.findUnique({
+    where: { id: expedienteId },
+    select: { flujoVersion: { select: { etapas_json: true } }, etapaActual: { select: { orden_snapshot: true } } },
+  });
+  const stages = Array.isArray(current?.flujoVersion?.etapas_json)
+    ? current.flujoVersion.etapas_json as Array<Record<string, any>>
+    : [];
+  const stage = stages
+    .filter((candidate) => String(candidate.estado || candidate.estado_general_relacionado || '') === target
+      && Number(candidate.orden || 0) > (current?.etapaActual?.orden_snapshot || 0))
+    .sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0))[0];
+  return stage?.clave ? String(stage.clave) : undefined;
+}
+
+function parseOperationalDate(value: unknown, label: string, required = false) {
+  if (!value && !required) return undefined;
+  const parsed = new Date(String(value || ''));
+  if (Number.isNaN(parsed.getTime())) throw new ExpedienteUpdateError(`${label} no es válida.`, 'EXPEDIENTE_DATE_INVALID');
+  return parsed;
+}
 
 class ExpedienteUpdateError extends Error {
   constructor(
@@ -89,8 +123,23 @@ export const getExpedientes = async (req: Request, res: Response) => {
     ]);
 
     const canReadFinance = req.user?.permissions.includes('finanzas.read');
+    const operationalRole = req.user && ['RECEPCION', 'GESTORIA'].includes(req.user.rol);
     res.json({
-      data: expedientes.map((item) => canReadFinance ? item : { ...item, valor_operacion: null, _count: { ...item._count, movimientosFinancieros: 0 } }),
+      data: expedientes.map((item) => operationalRole ? {
+        id: item.id,
+        numero_pravia: item.numero_pravia,
+        numero_notaria: item.numero_notaria,
+        cliente_alias: item.cliente_alias,
+        estatus: item.estatus,
+        version: item.version,
+        etapa_actual_nombre: item.etapa_actual_nombre,
+        proxima_accion: item.proxima_accion,
+        fecha_limite_accion: item.fecha_limite_accion,
+        updated_at: item.updated_at,
+        tipo_acto: item.tipo_acto,
+        etapaActual: item.etapaActual,
+        requisitos_count: item._count.requisitos_docs,
+      } : canReadFinance ? item : { ...item, valor_operacion: null, _count: { ...item._count, movimientosFinancieros: 0 } }),
       meta: {
         total,
         page: Number(page),
@@ -112,6 +161,7 @@ export const getExpedienteById = async (req: Request, res: Response) => {
       where: { id },
       include: {
         tipo_acto: true,
+        flujoVersion: true,
         abogado: { select: { id: true, nombre: true, apellido: true, email: true } },
         gestor: { select: { id: true, nombre: true, apellido: true } },
         creador: { select: { id: true, nombre: true, apellido: true } },
@@ -167,7 +217,9 @@ export const getExpedienteById = async (req: Request, res: Response) => {
         tareas: {
           where: { estatus: { not: 'CANCELADA' } },
           include: { asignado_a: { select: { id: true, nombre: true, apellido: true } } }
-        }
+        },
+        tareas_externas: { orderBy: { updated_at: 'desc' } },
+        entrega: true,
       }
     });
 
@@ -176,25 +228,27 @@ export const getExpedienteById = async (req: Request, res: Response) => {
     }
 
     const currentStageOrder = expediente.etapaActual?.orden_snapshot || 0;
-    const workflowStages = await prisma.flujoEtapa.findMany({
-      where: { tipo_acto_id: expediente.tipo_acto_id, activa: true },
-      select: {
-        clave: true,
-        nombre: true,
-        orden: true,
-        obligatoria: true,
-        se_puede_omitir: true,
-        duracion_esperada_dias: true,
-        estado_general_relacionado: true,
-      },
-      orderBy: { orden: 'asc' },
-    });
+    const frozenStages = Array.isArray(expediente.flujoVersion?.etapas_json)
+      ? expediente.flujoVersion.etapas_json as Array<Record<string, any>>
+      : [];
+    const workflowStages = frozenStages
+      .map((stage) => ({
+        clave: String(stage.clave || ''),
+        nombre: String(stage.nombre || ''),
+        orden: Number(stage.orden || 0),
+        obligatoria: stage.obligatoria !== false,
+        se_puede_omitir: stage.se_puede_omitir === true,
+        duracion_esperada_dias: Number(stage.duracion ?? stage.duracion_esperada_dias ?? 0) || null,
+        estado_general_relacionado: String(stage.estado || stage.estado_general_relacionado || ''),
+      }))
+      .sort((a, b) => a.orden - b.orden);
     const allowedStatuses = getAllowedExpedienteTransitions(expediente.estatus);
     const transitions = allowedStatuses.map((status) => ({
       status,
       label: EXPEDIENTE_STATUS_LABELS[status],
       stage: workflowStages.find((stage) => stage.estado_general_relacionado === status && stage.orden > currentStageOrder) || null,
       requires_signature_data: status === 'FIRMA_PROGRAMADA',
+      requires_effective_date: status === 'FIRMADO' || status === 'ENTREGADO',
       requires_notes: status === 'ENTREGADO' || status === 'CANCELADO' || status === 'SUSPENDIDO',
     }));
     const nextStage = workflowStages.find(
@@ -202,6 +256,52 @@ export const getExpedienteById = async (req: Request, res: Response) => {
     ) || null;
 
     const canReadFinance = req.user?.permissions.includes('finanzas.read');
+    const progress = await calculateExpedienteProgress(id);
+    if (req.user && ['RECEPCION', 'GESTORIA'].includes(req.user.rol)) {
+      const isReception = req.user.rol === 'RECEPCION';
+      const permittedTransitions = transitions.filter((item) => isReception
+        ? item.status === 'ENTREGADO'
+        : ['POST_FIRMA', 'LISTO_ENTREGA'].includes(item.status));
+      return res.json({
+        id: expediente.id,
+        numero_pravia: expediente.numero_pravia,
+        numero_notaria: expediente.numero_notaria,
+        cliente_alias: expediente.cliente_alias,
+        estatus: expediente.estatus,
+        version: expediente.version,
+        etapa_actual_nombre: expediente.etapa_actual_nombre,
+        proxima_accion: expediente.proxima_accion,
+        fecha_limite_accion: expediente.fecha_limite_accion,
+        updated_at: expediente.updated_at,
+        tipo_acto: { id: expediente.tipo_acto.id, nombre: expediente.tipo_acto.nombre },
+        notaria: isReception || !expediente.notaria ? null : {
+          id: expediente.notaria.id,
+          nombre: expediente.notaria.nombre,
+          numero_notaria: expediente.notaria.numero_notaria,
+          contacto_principal: expediente.notaria.contacto_principal,
+          telefono: expediente.notaria.telefono,
+        },
+        requisitos_docs: expediente.requisitos_docs.map((item) => ({
+          id: item.id, nombre: item.nombre, categoria: item.categoria, obligatorio: item.obligatorio, estatus: item.estatus,
+        })),
+        documentos_autorizados: expediente.expedienteDocumentos.map((link) => ({
+          id: link.documento.id,
+          nombre: link.documento.nombre_original,
+          tipo: link.documento.tipo,
+          categoria: link.documento.categoria,
+          estatus: link.documento.estatus,
+          tipo_vinculo: link.tipo_vinculo,
+        })),
+        tareas_postfirma: isReception ? [] : expediente.tareas_externas,
+        entrega: expediente.entrega,
+        workflow: {
+          current_status_label: EXPEDIENTE_STATUS_LABELS[expediente.estatus],
+          transitions: permittedTransitions,
+          next_stage: nextStage,
+        },
+        progress: { documental: progress.documental, operativo: progress.operativo, general: progress.general },
+      });
+    }
     res.json({
       ...expediente,
       ...(canReadFinance ? {} : { valor_operacion: null, movimientosFinancieros: [], financial_access: false }),
@@ -211,6 +311,7 @@ export const getExpedienteById = async (req: Request, res: Response) => {
         next_stage: nextStage,
         stages: workflowStages,
       },
+      progress,
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Error al obtener detalle del expediente', detail: error.message });
@@ -230,7 +331,8 @@ export const createExpediente = async (req: Request, res: Response) => {
       datos_operacion
     } = req.body;
 
-    const creador_id = req.user?.id || abogado_id;
+    const creador_id = req.user?.id;
+    if (!creador_id) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
     const assignedLawyerId = req.user?.rol === 'ABOGADO' ? req.user.id : abogado_id;
 
     if (!tipo_acto_id || !assignedLawyerId || !cliente_alias) {
@@ -249,12 +351,8 @@ export const createExpediente = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'TipoActo no encontrado' });
     }
 
-    // Generar Número PRAVIA correlativo
-    const countAño = await prisma.expediente.count();
-    const añoActual = new Date().getFullYear();
-    const numero_pravia = `EXP-${añoActual}-${String(countAño + 1).padStart(4, '0')}`;
-
     const expediente = await prisma.$transaction(async (tx) => {
+      const numero_pravia = await reserveExpedienteFolio(tx);
       const exp = await tx.expediente.create({
         data: {
           numero_pravia,
@@ -334,12 +432,15 @@ export const createExpediente = async (req: Request, res: Response) => {
 // 4. Conversión de Cotización Aceptada a Expediente
 export const convertCotizacionToExpediente = async (req: Request, res: Response) => {
   try {
-    const { cotizacion_id, abogado_id, tipo_acto_id, user_id } = req.body;
+    const { cotizacion_id, abogado_id, tipo_acto_id } = req.body;
+    if (!req.user || !(await canAccessCotizacion(req.user, String(cotizacion_id)))) {
+      return res.status(403).json({ error: 'No tienes acceso a esta cotización.', code: 'COTIZACION_ACCESS_DENIED' });
+    }
     const result = await cotizacionConversionService.convert({
       cotizacionId: cotizacion_id,
       abogadoId: abogado_id,
       tipoActoId: tipo_acto_id,
-      actorUserId: (req as any).user?.id || user_id,
+      actorUserId: req.user?.id,
       correlationId: (req as any).correlationId,
     });
     res.status(result.alreadyConverted ? 200 : 201).json({
@@ -361,8 +462,8 @@ export const convertCotizacionToExpediente = async (req: Request, res: Response)
 export const transitionEstatus = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { expected_version, nuevo_estatus, nueva_etapa_clave, notas, datos_firma, user_id } = req.body;
-    const actor_user_id = (req as any).user?.id || user_id;
+    const { expected_version, nuevo_estatus, nueva_etapa_clave, notas, datos_firma, fecha_efectiva } = req.body;
+    const actor_user_id = req.user?.id;
 
     if (!actor_user_id) {
       return res.status(401).json({ error: 'Usuario no autenticado en la sesión' });
@@ -377,6 +478,7 @@ export const transitionEstatus = async (req: Request, res: Response) => {
       select: {
         tipo_acto_id: true,
         estatus: true,
+        flujoVersion: { select: { etapas_json: true } },
         etapaActual: { select: { orden_snapshot: true } },
       }
     });
@@ -389,17 +491,16 @@ export const transitionEstatus = async (req: Request, res: Response) => {
       || ['PENDIENTE_NOTARIA', 'FIRMA_PROGRAMADA', 'FIRMADO', 'POST_FIRMA', 'ENTREGADO'].includes(nuevo_estatus)
     );
     if (!resolvedStageKey && shouldResolveStage) {
-      const stage = await prisma.flujoEtapa.findFirst({
-        where: {
-          tipo_acto_id: current.tipo_acto_id,
-          activa: true,
-          estado_general_relacionado: nuevo_estatus,
-          orden: { gt: current.etapaActual?.orden_snapshot || 0 },
-        },
-        orderBy: { orden: 'asc' },
-        select: { clave: true },
-      });
-      resolvedStageKey = stage?.clave;
+      const frozenStages = Array.isArray(current.flujoVersion?.etapas_json)
+        ? current.flujoVersion.etapas_json as Array<Record<string, any>>
+        : [];
+      const stage = frozenStages
+        .filter((candidate) =>
+          String(candidate.estado || candidate.estado_general_relacionado || '') === nuevo_estatus
+          && Number(candidate.orden || 0) > (current.etapaActual?.orden_snapshot || 0),
+        )
+        .sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0))[0];
+      resolvedStageKey = stage?.clave ? String(stage.clave) : undefined;
     }
 
     let signatureData: TransicionPayload['datosFirma'];
@@ -414,6 +515,14 @@ export const transitionEstatus = async (req: Request, res: Response) => {
         autorizaSaldoPendiente: Boolean(datos_firma.autoriza_saldo_pendiente),
       };
     }
+    let effectiveDate: Date | undefined;
+    if (fecha_efectiva) {
+      effectiveDate = new Date(fecha_efectiva);
+      if (Number.isNaN(effectiveDate.getTime())) return res.status(400).json({ error: 'La fecha efectiva no es válida.' });
+      if (effectiveDate.getTime() > Date.now() + 5 * 60_000) {
+        return res.status(400).json({ error: 'La fecha efectiva de un hecho concluido no puede estar en el futuro.' });
+      }
+    }
 
     const workflowService = new ExpedienteWorkflowService(prisma);
     const expedienteActualizado = await workflowService.ejecutarTransicion({
@@ -424,6 +533,7 @@ export const transitionEstatus = async (req: Request, res: Response) => {
       actorUserId: actor_user_id,
       observaciones: notas,
       datosFirma: signatureData,
+      fechaEfectiva: effectiveDate,
     });
 
     res.json(expedienteActualizado);
@@ -436,6 +546,151 @@ export const transitionEstatus = async (req: Request, res: Response) => {
           ? 401
           : 400;
     res.status(statusCode).json({ error: error.message, code: error.code || 'EXPEDIENTE_TRANSITION_FAILED' });
+  }
+};
+
+export const registerFinalDelivery = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const scoped = await assertRequestExpedienteScope(req, id);
+    if (scoped.estatus !== 'LISTO_ENTREGA') {
+      return res.status(409).json({ error: 'El expediente debe estar listo para entrega.', code: 'EXPEDIENTE_DELIVERY_STATE_INVALID' });
+    }
+    const {
+      expected_version, receptor_nombre, receptor_caracter, fecha_efectiva, medio,
+      items, evidencia_documento_id, observaciones,
+    } = req.body;
+    if (expected_version === undefined) return res.status(400).json({ error: 'Indica la versión actual del expediente.', code: 'EXPEDIENTE_VERSION_REQUIRED' });
+    const effectiveDate = parseOperationalDate(fecha_efectiva, 'La fecha efectiva', true)!;
+    const stageKey = await resolveNextFrozenStage(id, 'ENTREGADO');
+    const result = await new ExpedienteWorkflowService(prisma).ejecutarTransicion({
+      expedienteId: id,
+      versionActual: Number(expected_version),
+      nuevoEstatus: 'ENTREGADO',
+      nuevaEtapaClave: stageKey,
+      actorUserId: req.user!.id,
+      fechaEfectiva: effectiveDate,
+      observaciones,
+      entrega: {
+        receptor_nombre: String(receptor_nombre || ''),
+        receptor_caracter: String(receptor_caracter || ''),
+        fecha_efectiva: effectiveDate,
+        medio: String(medio || ''),
+        evidencia_documento_id: String(evidencia_documento_id || ''),
+        items: Array.isArray(items) ? items.map((item) => ({
+          documento_id: String(item?.documento_id || ''),
+          tipo: String(item?.tipo || '').toUpperCase(),
+          cantidad: Number(item?.cantidad),
+        })) as any : [],
+        observaciones: typeof observaciones === 'string' ? observaciones : undefined,
+      },
+    });
+    return res.status(201).json(result);
+  } catch (error: any) {
+    const status = error instanceof ExpedienteWorkflowError || error instanceof ExpedienteUpdateError ? error.status : 400;
+    return res.status(status).json({ error: error.message, code: error.code || 'EXPEDIENTE_DELIVERY_FAILED' });
+  }
+};
+
+export const createPostfirmaTask = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const scoped = await assertRequestExpedienteScope(req, id);
+    if (!['FIRMADO', 'POST_FIRMA'].includes(scoped.estatus)) {
+      return res.status(409).json({ error: 'Los trámites externos solo se administran durante postfirma.', code: 'EXPEDIENTE_POSTFIRMA_STATE_INVALID' });
+    }
+    const { tipo, descripcion, institucion, folio, fecha_ingreso, fecha_limite, seguimiento, prevencion, subsanacion, notas, evidencia_documento_id } = req.body;
+    if (!Object.values(TipoTareaExterna).includes(tipo) || !String(descripcion || '').trim() || !String(institucion || '').trim()) {
+      return res.status(400).json({ error: 'Completa el tipo, la descripción y la institución del trámite.', code: 'EXPEDIENTE_POSTFIRMA_DATA_REQUIRED' });
+    }
+    if (evidencia_documento_id) {
+      const evidence = await prisma.expedienteDocumento.findFirst({ where: { expediente_id: id, documento_id: String(evidencia_documento_id), estatus: 'ACTIVO' }, select: { id: true } });
+      if (!evidence) return res.status(400).json({ error: 'La evidencia seleccionada no pertenece al expediente.', code: 'EXPEDIENTE_POSTFIRMA_EVIDENCE_INVALID' });
+    }
+    const task = await prisma.tareaExterna.create({ data: {
+      expediente_id: id,
+      tipo,
+      descripcion: String(descripcion).trim(),
+      institucion: String(institucion).trim(),
+      folio: String(folio || '').trim() || null,
+      fecha_ingreso: parseOperationalDate(fecha_ingreso, 'La fecha de ingreso'),
+      fecha_inicio: new Date(),
+      fecha_limite: parseOperationalDate(fecha_limite, 'La fecha límite'),
+      seguimiento: String(seguimiento || '').trim() || null,
+      prevencion: String(prevencion || '').trim() || null,
+      subsanacion: String(subsanacion || '').trim() || null,
+      notas: String(notas || '').trim() || null,
+      evidencia_documento_id: evidencia_documento_id ? String(evidencia_documento_id) : null,
+      gestionado_por_id: req.user!.id,
+    } });
+    return res.status(201).json(task);
+  } catch (error: any) {
+    const status = error instanceof ExpedienteUpdateError ? error.status : 400;
+    return res.status(status).json({ error: error.message, code: error.code || 'EXPEDIENTE_POSTFIRMA_CREATE_FAILED' });
+  }
+};
+
+export const updatePostfirmaTask = async (req: Request, res: Response) => {
+  try {
+    const { id, taskId } = req.params;
+    const scoped = await assertRequestExpedienteScope(req, id);
+    if (!['FIRMADO', 'POST_FIRMA'].includes(scoped.estatus)) {
+      return res.status(409).json({ error: 'Este expediente ya no admite cambios en sus trámites postfirma.', code: 'EXPEDIENTE_POSTFIRMA_STATE_INVALID' });
+    }
+    const existing = await prisma.tareaExterna.findFirst({ where: { id: taskId, expediente_id: id } });
+    if (!existing) return res.status(404).json({ error: 'Trámite no encontrado.', code: 'EXPEDIENTE_POSTFIRMA_TASK_NOT_FOUND' });
+    const status = req.body.estatus ? String(req.body.estatus).toUpperCase() as TareaExternaEstatus : existing.estatus;
+    if (!Object.values(TareaExternaEstatus).includes(status)) return res.status(400).json({ error: 'Selecciona un estado de trámite válido.', code: 'EXPEDIENTE_POSTFIRMA_STATUS_INVALID' });
+    if (req.body.evidencia_documento_id) {
+      const evidence = await prisma.expedienteDocumento.findFirst({ where: { expediente_id: id, documento_id: String(req.body.evidencia_documento_id), estatus: 'ACTIVO' }, select: { id: true } });
+      if (!evidence) return res.status(400).json({ error: 'La evidencia seleccionada no pertenece al expediente.', code: 'EXPEDIENTE_POSTFIRMA_EVIDENCE_INVALID' });
+    }
+    const resultText = String(req.body.resultado ?? existing.resultado ?? '').trim();
+    const evidenceId = req.body.evidencia_documento_id ?? existing.evidencia_documento_id;
+    if (status === 'COMPLETADA' && (!resultText || !evidenceId)) {
+      return res.status(400).json({ error: 'Para concluir el trámite registra el resultado y una evidencia.', code: 'EXPEDIENTE_POSTFIRMA_CLOSE_DATA_REQUIRED' });
+    }
+    const task = await prisma.tareaExterna.update({ where: { id: taskId }, data: {
+      estatus: status,
+      folio: req.body.folio !== undefined ? String(req.body.folio).trim() || null : undefined,
+      fecha_ingreso: req.body.fecha_ingreso !== undefined ? parseOperationalDate(req.body.fecha_ingreso, 'La fecha de ingreso') : undefined,
+      fecha_limite: req.body.fecha_limite !== undefined ? parseOperationalDate(req.body.fecha_limite, 'La fecha límite') : undefined,
+      seguimiento: req.body.seguimiento !== undefined ? String(req.body.seguimiento).trim() || null : undefined,
+      prevencion: req.body.prevencion !== undefined ? String(req.body.prevencion).trim() || null : undefined,
+      subsanacion: req.body.subsanacion !== undefined ? String(req.body.subsanacion).trim() || null : undefined,
+      resultado: req.body.resultado !== undefined ? resultText || null : undefined,
+      notas: req.body.notas !== undefined ? String(req.body.notas).trim() || null : undefined,
+      evidencia_documento_id: req.body.evidencia_documento_id !== undefined ? String(req.body.evidencia_documento_id) : undefined,
+      fecha_completada: status === 'COMPLETADA' ? existing.fecha_completada || new Date() : null,
+      gestionado_por_id: req.user!.id,
+    } });
+    return res.json(task);
+  } catch (error: any) {
+    const status = error instanceof ExpedienteUpdateError ? error.status : 400;
+    return res.status(status).json({ error: error.message, code: error.code || 'EXPEDIENTE_POSTFIRMA_UPDATE_FAILED' });
+  }
+};
+
+export const transitionPostfirma = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await assertRequestExpedienteScope(req, id);
+    const target = String(req.body.nuevo_estatus || '').toUpperCase() as ExpedienteEstatus;
+    if (!['POST_FIRMA', 'LISTO_ENTREGA'].includes(target)) return res.status(400).json({ error: 'Selecciona un avance válido de postfirma.', code: 'EXPEDIENTE_POSTFIRMA_TARGET_INVALID' });
+    if (req.body.expected_version === undefined) return res.status(400).json({ error: 'Indica la versión actual del expediente.', code: 'EXPEDIENTE_VERSION_REQUIRED' });
+    const stageKey = await resolveNextFrozenStage(id, target);
+    const result = await new ExpedienteWorkflowService(prisma).ejecutarTransicion({
+      expedienteId: id,
+      versionActual: Number(req.body.expected_version),
+      nuevoEstatus: target,
+      nuevaEtapaClave: stageKey,
+      actorUserId: req.user!.id,
+      observaciones: typeof req.body.observaciones === 'string' ? req.body.observaciones : undefined,
+    });
+    return res.json(result);
+  } catch (error: any) {
+    const status = error instanceof ExpedienteWorkflowError || error instanceof ExpedienteUpdateError ? error.status : 400;
+    return res.status(status).json({ error: error.message, code: error.code || 'EXPEDIENTE_POSTFIRMA_TRANSITION_FAILED' });
   }
 };
 
@@ -462,7 +717,7 @@ function normalizarNaturaleza(nat?: string): NaturalezaMovimiento {
 }
 
 async function resolveActiveFinancialActor(req: Request) {
-  const actorId = (req as any).user?.id || req.body?.user_id;
+  const actorId = req.user?.id;
   if (!actorId) return null;
   return prisma.user.findFirst({ where: { id: actorId, activo: true }, select: { id: true } });
 }
@@ -688,7 +943,6 @@ export const updateExpedienteHeader = async (req: Request, res: Response) => {
       budget_items,
       honorarios_pravia,
       version: expectedVersion,
-      user_id,
     } = req.body;
     const cleanAlias = cliente_alias === undefined ? undefined : String(cliente_alias).trim();
     const cleanAbogadoId = abogado_id === undefined ? undefined : String(abogado_id).trim();
@@ -755,7 +1009,8 @@ export const updateExpedienteHeader = async (req: Request, res: Response) => {
         if (!notary) throw new ExpedienteUpdateError('La notaría seleccionada no existe o está inactiva.', 'EXPEDIENTE_NOTARY_INVALID');
       }
 
-      const actorId = (req as any).user?.id || user_id || cleanAbogadoId || currentExp.abogado_id;
+      const actorId = req.user?.id;
+      if (!actorId) throw new ExpedienteUpdateError('Tu sesión no es válida.', 'AUTH_REQUIRED', 401);
       const actor = await tx.user.findFirst({ where: { id: actorId, activo: true }, select: { id: true } });
       if (!actor) throw new ExpedienteUpdateError('No existe un usuario activo para registrar el cambio.', 'EXPEDIENTE_ACTOR_INVALID', 403);
 
@@ -854,14 +1109,9 @@ export const addExpedienteDocumento = async (req: Request, res: Response) => {
     const file = req.file;
     const { nombre, categoria, carpeta, observaciones } = req.body;
     
-    let userId = (req as any).user?.id || req.body.user_id;
+    const userId = req.user?.id;
     if (!userId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) userId = defaultUser.id;
-    }
-
-    if (!userId) {
-      return res.status(400).json({ error: 'No se encontró un usuario válido para registrar la actividad documental' });
+      return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
     }
 
     const exp = await prisma.expediente.findUnique({ where: { id } });
@@ -983,11 +1233,8 @@ export const addExpedienteDocumento = async (req: Request, res: Response) => {
 export const deleteExpedienteDocumento = async (req: Request, res: Response) => {
   try {
     const { id, documentoId } = req.params;
-    let userId = (req as any).user?.id || req.body?.usuario_id;
-    if (!userId) {
-      const validUser = await prisma.user.findFirst();
-      if (validUser) userId = validUser.id;
-    }
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     const expDoc = await prisma.expedienteDocumento.findFirst({
       where: {
@@ -1005,21 +1252,19 @@ export const deleteExpedienteDocumento = async (req: Request, res: Response) => 
           data: {
             estatus: 'INACTIVO',
             inactivado_at: new Date(),
-            inactivado_por_id: userId || null
+            inactivado_por_id: userId
           }
         });
 
-        if (userId) {
-          await tx.expedienteActividad.create({
-            data: {
-              expediente_id: id,
-              tipo: 'DOCUMENTO',
-              titulo: `Documento "${expDoc.documento.nombre_original}" Eliminado del Archivo`,
-              descripcion: 'Documento retirado de la vista del expediente; el archivo se conserva internamente para auditoría.',
-              usuario_id: userId
-            }
-          });
-        }
+        await tx.expedienteActividad.create({
+          data: {
+            expediente_id: id,
+            tipo: 'DOCUMENTO',
+            titulo: `Documento "${expDoc.documento.nombre_original}" Eliminado del Archivo`,
+            descripcion: 'Documento retirado de la vista del expediente; el archivo se conserva internamente para auditoría.',
+            usuario_id: userId
+          }
+        });
       });
 
       return res.json({ success: true, message: 'Documento eliminado exitosamente' });
@@ -1034,17 +1279,15 @@ export const deleteExpedienteDocumento = async (req: Request, res: Response) => 
     await prisma.$transaction(async (tx) => {
       await tx.expedienteRequisitoDoc.delete({ where: { id: documentoId } });
 
-      if (userId) {
-        await tx.expedienteActividad.create({
-          data: {
-            expediente_id: id,
-            tipo: 'DOCUMENTO',
-            titulo: `Documento "${legacyDoc.nombre}" Eliminado del Archivo`,
-            descripcion: 'Registro documental heredado eliminado del expediente',
-            usuario_id: userId
-          }
-        });
-      }
+      await tx.expedienteActividad.create({
+        data: {
+          expediente_id: id,
+          tipo: 'DOCUMENTO',
+          titulo: `Documento "${legacyDoc.nombre}" Eliminado del Archivo`,
+          descripcion: 'Registro documental heredado eliminado del expediente',
+          usuario_id: userId
+        }
+      });
     });
 
     res.json({ success: true, message: 'Documento eliminado exitosamente' });
@@ -1059,11 +1302,8 @@ export const updateExpedienteDocumento = async (req: Request, res: Response) => 
     const { id, documentoId } = req.params;
     const { nombre, carpeta } = req.body;
 
-    let userId = (req as any).user?.id || req.body.user_id;
-    if (!userId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) userId = defaultUser.id;
-    }
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Tu sesión no es válida.', code: 'AUTH_REQUIRED' });
 
     const expDoc = await prisma.expedienteDocumento.findFirst({
       where: {

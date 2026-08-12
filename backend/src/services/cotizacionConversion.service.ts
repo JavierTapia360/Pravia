@@ -1,5 +1,6 @@
-import { Prisma, PrismaClient } from '@prisma/client';
+import { DocCategoria, Prisma, PrismaClient } from '@prisma/client';
 import { CotizacionBusinessError, evaluateConversionEligibility } from '../domain/cotizacionWorkflow';
+import { reserveExpedienteFolio } from './expedienteFolio.service';
 
 export interface ConvertCotizacionInput {
   cotizacionId: string;
@@ -83,17 +84,16 @@ export class CotizacionConversionService {
         tx.plantillaDocumentalVersion.findFirst({ where: { tipo_acto_id: tipoActo.id }, orderBy: { version: 'desc' } }),
       ]);
 
-      const year = new Date().getFullYear();
-      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:expediente-folio:${year}`}))`);
-      const yearlyFolios = await tx.expediente.findMany({
-        where: { numero_pravia: { startsWith: `EXP-${year}-` } },
-        select: { numero_pravia: true },
-      });
-      const nextSequence = yearlyFolios.reduce((highest, expediente) => {
-        const match = expediente.numero_pravia.match(new RegExp(`^EXP-${year}-(\\d+)$`));
-        return Math.max(highest, match ? Number(match[1]) : 0);
-      }, 0) + 1;
-      const numeroPravia = `EXP-${year}-${String(nextSequence).padStart(4, '0')}`;
+      const numeroPravia = await reserveExpedienteFolio(tx);
+      const approvedVersion = cotizacion.versiones.find((version) => version.aprobada)
+        || cotizacion.versiones[0];
+      const frozenBudget = approvedVersion ? {
+        rubros: (approvedVersion.desglose_notaria as any)?.rubros || [],
+        total_notaria: Number(approvedVersion.total_notaria),
+        honorarios_pravia: Number(approvedVersion.honorarios_pravia),
+        total_cliente: Number(approvedVersion.total_cliente),
+        cotizacion_version_id: approvedVersion.id,
+      } : null;
 
       const expediente = await tx.expediente.create({
         data: {
@@ -104,7 +104,8 @@ export class CotizacionConversionService {
           cotizacion_id: cotizacion.id,
           notaria_id: cotizacion.notaria_id,
           cliente_alias: cotizacion.prospecto?.nombre || 'Cliente',
-          valor_operacion: cotizacion.total_cliente,
+          valor_operacion: null,
+          datos_operacion: frozenBudget ? { presupuesto: frozenBudget } : undefined,
           formulario_version_id: formVersion?.id,
           flujo_version_id: workflowVersion?.id,
           plantilla_doc_version_id: documentTemplateVersion?.id,
@@ -112,6 +113,44 @@ export class CotizacionConversionService {
           proxima_accion: 'Integrar documentación y comparecientes',
         },
       });
+
+      const frozenStages = Array.isArray(workflowVersion?.etapas_json)
+        ? workflowVersion.etapas_json as Array<Record<string, any>>
+        : [];
+      const firstStage = [...frozenStages].sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0))[0];
+      if (firstStage) {
+        const stageInstance = await tx.expedienteEtapa.create({
+          data: {
+            expediente_id: expediente.id,
+            flujo_version_id: workflowVersion!.id,
+            clave_snapshot: String(firstStage.clave),
+            nombre_snapshot: String(firstStage.nombre),
+            orden_snapshot: Number(firstStage.orden || 1),
+            duracion_esperada_snapshot: Number(firstStage.duracion ?? firstStage.duracion_esperada_dias ?? 0) || null,
+            responsable_id: lawyer.id,
+          },
+        });
+        await tx.expediente.update({
+          where: { id: expediente.id },
+          data: { expediente_etapa_actual_id: stageInstance.id, etapa_actual_nombre: stageInstance.nombre_snapshot },
+        });
+      }
+
+      const frozenRequirements = Array.isArray(documentTemplateVersion?.requisitos_json)
+        ? documentTemplateVersion.requisitos_json as Array<Record<string, any>>
+        : [];
+      for (const requirement of frozenRequirements) {
+        await tx.expedienteRequisitoDoc.create({
+          data: {
+            expediente_id: expediente.id,
+            nombre: String(requirement.nombre || 'Documento requerido'),
+            categoria: Object.values(DocCategoria).includes(String(requirement.categoria) as DocCategoria)
+              ? String(requirement.categoria) as DocCategoria
+              : DocCategoria.PROYECTO,
+            obligatorio: requirement.obligatorio !== false,
+          },
+        });
+      }
 
       const documentLinks = await this.collectDocuments(tx, cotizacion.id, cotizacion.prospecto_id);
       for (const documentId of documentLinks) {

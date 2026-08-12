@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { ComparecienteController } from '../controllers/compareciente.controller';
+import { requireComparecienteObjectAccess } from '../middleware/objectAccess.middleware';
 
 const upload = multer({ limits: { fileSize: 25 * 1024 * 1024 } });
 const router = Router();
+router.param('id', requireComparecienteObjectAccess);
 
 // Endpoints de consulta y duplicados
 router.get('/duplicados', ComparecienteController.buscarDuplicados);

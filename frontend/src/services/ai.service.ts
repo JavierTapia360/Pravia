@@ -44,7 +44,23 @@ export interface AIDashboard {
   solicitudes_recientes: AIUsageLog[];
 }
 
+export type AssistantToolName = 'searchExpedientes' | 'getExpedienteSummary' | 'getExpedientePendingItems' | 'searchComparecientes' | 'getComparecienteSummary' | 'getExpedienteDocuments' | 'getAgenda' | 'getUpcomingEvents' | 'getFinancialSummary' | 'getOutstandingBalances' | 'getComplianceSummary' | 'getCurrentUserWork' | 'globalSearch' | 'navigateToEntity' | 'prepareTask' | 'prepareAppointment' | 'prepareFollowUp';
+
+export interface AssistantToolResult<T = any> {
+  success: true;
+  tool: AssistantToolName;
+  correlation_id: string;
+  data: T;
+  provenance: Array<{ entity: string; id: string; label: string; path: string }>;
+  truncated: boolean;
+  limit: number;
+}
+
 export const aiService = {
+  executeTool: <T = any>(tool: AssistantToolName, args: Record<string, unknown>, context: object) =>
+    api.post(`/ia/assistant/tools/${tool}`, { args, context }) as Promise<AssistantToolResult<T>>,
+  confirmPreparedAction: (input: { tool: AssistantToolName; prepared_correlation_id: string; target_endpoint: string; result_entity_type?: string; result_entity_id?: string }) =>
+    api.post('/ia/assistant/confirmations', input),
   dashboard: (filters: { periodo: string; usuario_id?: string; operacion?: string }) => {
     const params = new URLSearchParams({ periodo: filters.periodo });
     if (filters.usuario_id && filters.usuario_id !== 'TODOS') params.set('usuario_id', filters.usuario_id);

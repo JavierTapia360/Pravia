@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
 import { getOpenAIEscalationModelName, getOpenAIModelName } from '../services/openaiDocument.service';
+import { ASSISTANT_TOOL_REGISTRY, AssistantToolError, assistantToolCatalog, canUseAssistantTool, executeAssistantTool, type AssistantToolName } from '../services/assistantTools.service';
 
 const asNumber = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 
@@ -14,8 +15,58 @@ function periodStart(value: unknown) {
 }
 
 export class AIController {
+  static async tools(req: Request, res: Response) {
+    if (!req.user) return res.status(401).json({ success: false, code: 'AUTH_REQUIRED', error: 'Inicia sesión para continuar.' });
+    return res.json({ success: true, tools: assistantToolCatalog(req.user) });
+  }
+
+  static async confirmPreparedAction(req: Request, res: Response) {
+    try {
+      if (!req.user) return res.status(401).json({ success: false, code: 'AUTH_REQUIRED', error: 'Inicia sesión para continuar.' });
+      const tool = String(req.body?.tool || '') as AssistantToolName;
+      const definition = ASSISTANT_TOOL_REGISTRY[tool];
+      if (!definition || definition.mode !== 'PREPARE_ONLY' || !canUseAssistantTool(req.user, tool)) {
+        return res.status(403).json({ success: false, code: 'AI_CONFIRMATION_DENIED', error: 'Esta confirmación no corresponde a una acción preparada disponible para tu función.' });
+      }
+      const preparedCorrelationId = String(req.body?.prepared_correlation_id || '').trim().slice(0, 120);
+      if (!preparedCorrelationId) return res.status(400).json({ success: false, code: 'AI_CONFIRMATION_REFERENCE_REQUIRED', error: 'No se encontró la referencia de la acción preparada.' });
+      await prisma.auditLog.create({ data: {
+        user_id: req.user.id,
+        accion: 'AI_TOOL_CONFIRMED',
+        entidad: 'User',
+        entidad_id: req.user.id,
+        correlation_id: req.correlationId,
+        session_id: req.user.sessionId,
+        detalles: {
+          tool,
+          prepared_correlation_id: preparedCorrelationId,
+          target_endpoint: String(req.body?.target_endpoint || '').slice(0, 160),
+          result_entity_type: String(req.body?.result_entity_type || '').slice(0, 60) || null,
+          result_entity_id: String(req.body?.result_entity_id || '').slice(0, 80) || null,
+        },
+      } });
+      return res.status(201).json({ success: true, correlation_id: req.correlationId });
+    } catch {
+      return res.status(500).json({ success: false, code: 'AI_CONFIRMATION_AUDIT_FAILED', error: 'La acción se registró, pero no fue posible completar su constancia de confirmación.' });
+    }
+  }
+
+  static async executeTool(req: Request, res: Response) {
+    try {
+      if (!req.user) return res.status(401).json({ success: false, code: 'AUTH_REQUIRED', error: 'Inicia sesión para continuar.' });
+      const result = await executeAssistantTool({ tool: req.params.tool as AssistantToolName, args: req.body?.args, context: req.body?.context, user: req.user, correlationId: req.correlationId || crypto.randomUUID() });
+      return res.json(result);
+    } catch (error: any) {
+      const status = error instanceof AssistantToolError ? error.status : 500;
+      return res.status(status).json({ success: false, code: error.code || 'AI_TOOL_FAILED', error: status === 500 ? 'No fue posible ejecutar la herramienta solicitada.' : error.message, correlation_id: req.correlationId });
+    }
+  }
+
   static async dashboard(req: Request, res: Response) {
     try {
+      if (!req.user || !['DIRECCION', 'ADMINISTRACION'].includes(req.user.rol)) {
+        return res.status(403).json({ success: false, code: 'AI_CONFIGURATION_ACCESS_DENIED', error: 'La configuración técnica de IA es exclusiva de roles administrativos.' });
+      }
       const from = periodStart(req.query.periodo);
       const where = {
         created_at: { gte: from },

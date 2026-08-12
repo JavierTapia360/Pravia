@@ -22,8 +22,9 @@ import complianceRoutes from './routes/compliance.routes';
 import authRoutes from './routes/auth.routes';
 import usersRoutes from './routes/users.routes';
 import storageRoutes from './routes/storage.routes';
-import { authenticate, authorizeByMethod, requirePasswordReady, requirePermission } from './middleware/auth.middleware';
+import { authenticate, authorizeByMethod, authorizeExpedienteRequest, requirePasswordReady, requirePermission } from './middleware/auth.middleware';
 import { errorLogLevel, normalizeErrorBody } from './utils/httpError';
+import { getStorageCompensationHealth, storageCompensationWorker } from './workers/storageCompensation.worker';
 
 const app = express();
 app.disable('etag');
@@ -99,6 +100,7 @@ const healthHandler = async (req: Request, res: Response) => {
     await prisma.$queryRaw`SELECT 1`;
 
     storage = await checkStorageHealth();
+    const storageCompensation = await getStorageCompensationHealth();
     return res.json({
       api: 'ok',
       database: 'ok',
@@ -112,6 +114,7 @@ const healthHandler = async (req: Request, res: Response) => {
       storage_primary: storageInfo.primary,
       storage_provider: storageInfo.provider,
       replication_enabled: storageInfo.replication_enabled,
+      storage_compensation: storageCompensation,
       timestamp: new Date().toISOString(),
       correlation_id: correlationId,
     });
@@ -210,7 +213,7 @@ app.use('/api/prospectos', authorizeByMethod('prospectos.read', 'prospectos.writ
 app.use('/api/documentos', authorizeByMethod('documentos.read', 'documentos.write'), documentosRoutes);
 app.use('/api/notarias', authorizeByMethod('notarias.read', 'notarias.write'), notariasRoutes);
 app.use('/api/cotizaciones', authorizeByMethod('cotizaciones.read', 'cotizaciones.write'), cotizacionesRoutes);
-app.use('/api/expedientes', authorizeByMethod('expedientes.read', 'expedientes.write'), expedientesRoutes);
+app.use('/api/expedientes', authorizeExpedienteRequest, expedientesRoutes);
 app.use('/api/comparecientes/altas', authorizeByMethod('comparecientes.read', 'comparecientes.write'), comparecienteAltaSessionRoutes);
 app.use('/api/comparecientes/alta', authorizeByMethod('comparecientes.read', 'comparecientes.write'), comparecienteAltaSessionRoutes);
 app.use('/api/comparecientes', authorizeByMethod('comparecientes.read', 'comparecientes.write'), comparecientesRoutes);
@@ -218,7 +221,7 @@ app.use('/api/finanzas', requirePermission('finanzas.read'), finanzasRoutes);
 app.use('/api/agenda', authorizeByMethod('agenda.read', 'agenda.write'), agendaRoutes);
 app.use('/api/reportes', requirePermission('reportes.read'), reportesRoutes);
 app.use('/api/mi-dia', requirePermission('mi_dia.read'), miDiaRoutes);
-app.use('/api/ia', requirePermission('ia.read'), aiRoutes);
+app.use('/api/ia', aiRoutes);
 app.use('/api/cumplimiento', authorizeByMethod('cumplimiento.read', 'cumplimiento.write'), complianceRoutes);
 
 // 404 handler
@@ -250,8 +253,33 @@ app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
   });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`✅ PRAVIA OS Backend running on port ${PORT}`);
   console.log(`   Health: http://localhost:${PORT}/api/health`);
   console.log(`   Supabase Storage: ${process.env.SUPABASE_URL ? '✅ configured' : '❌ NOT configured'}`);
 });
+
+if (String(process.env.STORAGE_COMPENSATION_WORKER_ENABLED || 'false').toLowerCase() === 'true') {
+  storageCompensationWorker.start();
+}
+
+let shuttingDown = false;
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(JSON.stringify({ type: 'lifecycle', event: 'shutdown_started', signal }));
+  const forced = setTimeout(() => {
+    console.error(JSON.stringify({ type: 'lifecycle', event: 'shutdown_timeout', signal }));
+    process.exitCode = 1;
+    server.closeAllConnections?.();
+  }, 15_000);
+  forced.unref();
+  const workerDrained = await storageCompensationWorker.stop(10_000);
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await prisma.$disconnect().catch(() => undefined);
+  clearTimeout(forced);
+  console.log(JSON.stringify({ type: 'lifecycle', event: 'shutdown_completed', signal, worker_drained: workerDrained }));
+}
+
+process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
+process.once('SIGINT', () => { void shutdown('SIGINT'); });

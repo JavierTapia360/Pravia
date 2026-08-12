@@ -10,7 +10,8 @@
     "test": "vitest run",
     "check:pwa": "node scripts/verify-pwa.mjs",
     "check:bundle": "node scripts/verify-bundle.mjs",
-    "e2e:smoke": "node scripts/e2e-smoke.mjs"
+    "e2e:smoke": "node scripts/e2e-smoke.mjs",
+    "e2e:visual": "node scripts/visual-regression.mjs"
   },
   "dependencies": {
     "docx-preview": "^0.4.0",

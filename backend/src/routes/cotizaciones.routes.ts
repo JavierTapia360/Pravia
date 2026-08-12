@@ -18,9 +18,11 @@ import {
   unlinkCotizacionDocumento
 } from '../controllers/cotizaciones.controller';
 import { requirePermission } from '../middleware/auth.middleware';
+import { requireCotizacionObjectAccess, requireDocumentoObjectAccess } from '../middleware/objectAccess.middleware';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
+router.param('id', requireCotizacionObjectAccess);
 
 router.get('/', getCotizaciones);
 router.get('/:id', getCotizacionById);
@@ -39,6 +41,6 @@ router.patch('/:id/participacion-pravia', requirePermission('finanzas.write'), u
 
 // Documentos de Cotización (Heredados de Prospecto + Subidos en Cotización)
 router.get('/:id/documentos', getCotizacionDocumentos);
-router.delete('/:id/documentos/:documentoId', unlinkCotizacionDocumento);
+router.delete('/:id/documentos/:documentoId', requireDocumentoObjectAccess, requirePermission('documentos.unlink'), unlinkCotizacionDocumento);
 
 export default router;

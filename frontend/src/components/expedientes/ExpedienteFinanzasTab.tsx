@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useToastStore } from '../../stores/toastStore';
+import { useConfirmation } from '../ui/ConfirmDialog';
 
 interface MovimientoItem {
   id: string;
@@ -46,6 +47,7 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
   onUpdate
 }) => {
   const { addToast } = useToastStore();
+  const { requestConfirmation, confirmationDialog } = useConfirmation();
   const [loading, setLoading] = useState(true);
   const [expData, setExpData] = useState<any>(null);
   const [movimientos, setMovimientos] = useState<MovimientoItem[]>([]);
@@ -115,7 +117,7 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
   // Cálculos dinámicos
   const presupuestoOperativo = expData?.datos_operacion?.presupuesto;
   const totalPresupuestado = Number(
-    presupuestoOperativo?.total_cliente ?? expData?.cotizacion?.total_cliente ?? expData?.valor_operacion ?? 0
+    presupuestoOperativo?.total_cliente ?? expData?.cotizacion?.total_cliente ?? 0
   );
 
   const activeLedger = movimientos.filter(
@@ -174,7 +176,6 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
         fecha_movimiento: movForm.fecha_movimiento,
         forma_pago: movForm.forma_pago,
         referencia: movForm.referencia,
-        user_id: actorUserId,
       };
 
       const newMov = await api.post(`/expedientes/${expedienteId}/movimientos`, payload);
@@ -188,7 +189,6 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
             const fd = new FormData();
             fd.append('file', fileComprobante);
             fd.append('tipo_adjunto', 'COMPROBANTE');
-            fd.append('user_id', actorUserId);
             await api.upload(`/expedientes/${expedienteId}/movimientos/${movId}/adjuntos/upload`, fd);
           } catch (err: any) {
             uploadErrors.push(`Comprobante: ${err.message || 'Error de subida'}`);
@@ -199,7 +199,6 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
             const fd = new FormData();
             fd.append('file', fileFacturaPdf);
             fd.append('tipo_adjunto', 'FACTURA_PDF');
-            fd.append('user_id', actorUserId);
             await api.upload(`/expedientes/${expedienteId}/movimientos/${movId}/adjuntos/upload`, fd);
           } catch (err: any) {
             uploadErrors.push(`Factura PDF: ${err.message || 'Error de subida'}`);
@@ -210,7 +209,6 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
             const fd = new FormData();
             fd.append('file', fileFacturaXml);
             fd.append('tipo_adjunto', 'FACTURA_XML');
-            fd.append('user_id', actorUserId);
             await api.upload(`/expedientes/${expedienteId}/movimientos/${movId}/adjuntos/upload`, fd);
           } catch (err: any) {
             uploadErrors.push(`Factura XML: ${err.message || 'Error de subida'}`);
@@ -265,7 +263,6 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
       const fd = new FormData();
       fd.append('file', newAdjuntoFile);
       fd.append('tipo_adjunto', tipoAdjuntoUpload);
-      fd.append('user_id', actorUserId);
 
       await api.upload(
         `/expedientes/${expedienteId}/movimientos/${selectedAdjuntoMovId}/adjuntos/upload`,
@@ -288,12 +285,17 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
 
   // El vínculo deja de ser vigente, pero el archivo permanece en el historial.
   const handleArchiveAdjunto = async (movId: string, tipo: 'COMPROBANTE' | 'FACTURA_PDF' | 'FACTURA_XML') => {
-    if (!window.confirm(`¿Archivar el archivo ${tipo}? El historial se conservará.`)) return;
+    const accepted = await requestConfirmation({
+      title: `Archivar ${tipo.replace(/_/g, ' ')}`,
+      description: 'El vínculo vigente se archivará y el archivo permanecerá en el historial financiero.',
+      confirmLabel: 'Archivar archivo',
+      tone: 'warning',
+    });
+    if (!accepted) return;
     try {
       await api.patch(`/expedientes/${expedienteId}/movimientos/${movId}/adjunto`, {
         tipo_adjunto: tipo,
         accion: 'ARCHIVAR',
-        user_id: actorUserId,
       });
       addToast(`Adjunto ${tipo} archivado; el historial fue conservado`, 'info');
       await loadData();
@@ -316,7 +318,6 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
     try {
       await api.post(`/expedientes/${expedienteId}/movimientos/${selectedMovId}/revertir`, {
         motivo_reversion: reverseReason.trim(),
-        user_id: actorUserId,
       });
       addToast('Movimiento revertido con contramovimiento y bitácora', 'success');
       setShowReverseModal(false);
@@ -1089,6 +1090,7 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
           </div>
         </div>
       )}
+      {confirmationDialog}
 
     </div>
   );

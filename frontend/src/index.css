@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./styles/pravia-ai.css";
 
 @theme {
   --color-gold: #b45309;
@@ -501,6 +502,15 @@ tbody tr[tabindex="0"]:focus-visible { outline: 3px solid color-mix(in srgb, var
 .modal-header h2 { margin: 0; font-size: 1.35rem; }
 .modal-body { overflow-y: auto; padding: var(--space-6); }
 .modal-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-3); padding: var(--space-4) var(--space-6); border-top: 1px solid var(--border-color); background: var(--pravia-slate-50); }
+.confirmation-dialog { position: relative; z-index: 1001; max-width: 480px; }
+.confirmation-dialog .modal-header { justify-content: flex-start; }
+.confirmation-dialog__heading { min-width: 0; flex: 1; }
+.confirmation-dialog__icon { width: 40px; height: 40px; flex: 0 0 40px; display: grid; place-items: center; border-radius: var(--radius-md); background: #eff6ff; color: #1d4ed8; }
+.confirmation-dialog__icon--warning { background: #fffbeb; color: #a16207; }
+.confirmation-dialog__icon--danger { background: #fef2f2; color: #b91c1c; }
+.confirmation-dialog__description { color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.55; }
+.confirmation-dialog__danger { background: var(--color-danger); color: white; }
+.confirmation-dialog__danger:hover { background: #991b1b; }
 
 .slideover-shell { position: fixed; inset: 0; z-index: 900; display: flex; justify-content: flex-end; background: transparent; pointer-events: none; transition: background-color var(--duration-normal) ease; }
 .slideover-shell--open { background: rgb(8 19 38 / 0.48); pointer-events: auto; }
@@ -1070,6 +1080,7 @@ tbody tr[tabindex="0"]:focus-visible { outline: 3px solid color-mix(in srgb, var
   .prospect-document-row__actions { justify-content: flex-end; }
   .choice-button { flex-basis: calc(50% - var(--space-2)); }
 }
+
 
 .user-access-card {
   border: 1px solid var(--border-color);

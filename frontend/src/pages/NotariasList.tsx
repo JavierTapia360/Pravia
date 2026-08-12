@@ -5,13 +5,19 @@ import {
 } from 'lucide-react';
 import { useNotariasStore, Notaria, NotariaContacto } from '../stores/notariasStore';
 import { useToastStore } from '../stores/toastStore';
+import { useConfirmation } from '../components/ui/ConfirmDialog';
+import { ViewModeToggle, type ViewMode } from '../components/ui/ViewModeToggle';
 
 export default function NotariasList() {
   const { notarias, loading, fetchNotarias, createNotaria, updateNotaria, setPredeterminada, archiveNotaria } = useNotariasStore();
   const { addToast } = useToastStore();
+  const { requestConfirmation, confirmationDialog } = useConfirmation();
 
   const [search, setSearch] = useState('');
   const [filterActiva, setFilterActiva] = useState<'TODAS' | 'ACTIVAS' | 'INACTIVAS'>('TODAS');
+  const [viewMode, setViewMode] = useState<ViewMode>(() => (
+    localStorage.getItem('pravia_notarias_view') === 'cards' ? 'cards' : 'table'
+  ));
   
   // Modal State
   const [showModal, setShowModal] = useState(false);
@@ -161,9 +167,17 @@ export default function NotariasList() {
     setFormTouched(true);
   };
 
-  const handleCloseModal = () => {
+  const handleCloseModal = async () => {
     if (saving) return;
-    if (formTouched && !confirm('¿Cerrar sin guardar los cambios de esta ficha?')) return;
+    if (formTouched) {
+      const accepted = await requestConfirmation({
+        title: 'Cerrar sin guardar',
+        description: 'Los cambios realizados en esta ficha de notaría se perderán.',
+        confirmLabel: 'Descartar cambios',
+        tone: 'warning',
+      });
+      if (!accepted) return;
+    }
     setShowModal(false);
     setFormError('');
   };
@@ -216,7 +230,13 @@ export default function NotariasList() {
   };
 
   const handleArchiveNotaria = async (id: string, nombre: string) => {
-    if (!confirm(`¿Archivar la notaría "${nombre}"? Sus contactos, cotizaciones y expedientes se conservarán.`)) return;
+    const accepted = await requestConfirmation({
+      title: 'Archivar notaría',
+      description: `“${nombre}” dejará de estar disponible para nuevas operaciones. Sus contactos, cotizaciones y expedientes se conservarán.`,
+      confirmLabel: 'Archivar notaría',
+      tone: 'danger',
+    });
+    if (!accepted) return;
     try {
       await archiveNotaria(id);
       addToast(`Notaría "${nombre}" archivada de forma reversible`, 'success');
@@ -241,6 +261,11 @@ export default function NotariasList() {
     }
     return true;
   });
+
+  const handleViewMode = (mode: ViewMode) => {
+    setViewMode(mode);
+    localStorage.setItem('pravia_notarias_view', mode);
+  };
 
   return (
     <div className="module-page notarias-page fade-in">
@@ -312,6 +337,7 @@ export default function NotariasList() {
           >
             Inactivas ({notarias.filter(n => !n.activa).length})
           </button>
+          <ViewModeToggle value={viewMode} onChange={handleViewMode} label="Vista de notarías" />
         </div>
       </div>
 
@@ -319,7 +345,87 @@ export default function NotariasList() {
       {loading ? (
         <div className="p-16 text-center text-slate-600 flex flex-col items-center justify-center" role="status">
           <RefreshCw size={28} className="animate-spin text-amber-700 mb-2" />
-          <p className="text-xs font-semibold">Cargando catálogo de notarías...</p>
+          <p className="text-sm font-semibold">Cargando catálogo de notarías...</p>
+        </div>
+      ) : filteredNotarias.length > 0 && viewMode === 'table' ? (
+        <div className="data-surface">
+          <div className="data-table-scroll">
+            <table className="data-table min-w-[1120px]">
+              <thead>
+                <tr>
+                  <th>Notaría</th>
+                  <th>Titular y ubicación</th>
+                  <th>Contacto</th>
+                  <th>Tiempos operativos</th>
+                  <th>Actividad</th>
+                  <th>Estado</th>
+                  <th className="text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredNotarias.map((n) => (
+                  <tr key={n.id}>
+                    <td className="max-w-[260px]">
+                      <div className="flex items-start gap-3">
+                        <span className="inline-flex min-h-10 min-w-12 items-center justify-center rounded-lg border border-blue-100 bg-blue-50 px-2 font-mono text-sm font-extrabold text-blue-950">
+                          {n.numero_notaria ? `No. ${n.numero_notaria}` : 'S/N'}
+                        </span>
+                        <div>
+                          <span className="block font-extrabold leading-snug text-slate-950">{n.nombre}</span>
+                          {n.predeterminada && (
+                            <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[13px] font-bold text-amber-800">
+                              <Star size={12} className="fill-amber-700" aria-hidden="true" /> Predeterminada
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="max-w-[260px]">
+                      <span className="block font-semibold text-slate-900">{n.notario_titular || 'Titular no registrado'}</span>
+                      <span className="mt-1 flex items-center gap-1 text-[13px] text-slate-600"><MapPin size={13} aria-hidden="true" /> {n.municipio}, {n.entidad_federativa}</span>
+                    </td>
+                    <td className="max-w-[240px] text-slate-700">
+                      {n.telefono && <span className="flex items-center gap-2"><Phone size={14} aria-hidden="true" /> {n.telefono}</span>}
+                      {n.correo_general && <span className="mt-1 flex items-center gap-2 break-all"><Mail size={14} className="shrink-0" aria-hidden="true" /> {n.correo_general}</span>}
+                      {!n.telefono && !n.correo_general && <span className="text-slate-500">Sin contacto general</span>}
+                    </td>
+                    <td>
+                      <dl className="grid min-w-[190px] grid-cols-3 gap-2 text-[13px]">
+                        <div><dt className="text-slate-500">Respuesta</dt><dd className="font-bold text-slate-900">{n.tiempo_respuesta || '—'}</dd></div>
+                        <div><dt className="text-slate-500">Presup.</dt><dd className="font-bold text-slate-900">{n.tiempo_presupuesto || '—'}</dd></div>
+                        <div><dt className="text-slate-500">Firma</dt><dd className="font-bold text-slate-900">{n.tiempo_firma || '—'}</dd></div>
+                      </dl>
+                    </td>
+                    <td>
+                      <span className="block font-semibold text-slate-900">{n.contactos?.length || 0} contactos</span>
+                      <span className="mt-1 block text-[13px] text-slate-600">{n._count?.cotizaciones || 0} cotiz. · {n._count?.expedientes || 0} exp.</span>
+                    </td>
+                    <td>
+                      <span className={`inline-flex rounded-full px-2.5 py-1 text-[13px] font-bold ${n.activa ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>
+                        {n.activa ? 'Activa' : 'Inactiva'}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="flex justify-end gap-2">
+                        {!n.predeterminada && n.activa && (
+                          <button type="button" onClick={() => handleSetPredeterminada(n.id, n.nombre)} className="btn btn-secondary min-h-10 px-3" aria-label={`Establecer ${n.nombre} como predeterminada`}>
+                            <Star size={15} aria-hidden="true" /> Predeterminada
+                          </button>
+                        )}
+                        <button type="button" onClick={() => handleOpenEditModal(n)} className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-800" aria-label={`Editar ${n.nombre}`}>
+                          <Edit2 size={16} aria-hidden="true" />
+                        </button>
+                        <button type="button" onClick={() => handleArchiveNotaria(n.id, n.nombre)} className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-600 hover:bg-amber-50 hover:text-amber-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-800" aria-label={`Archivar ${n.nombre}`}>
+                          <Archive size={16} aria-hidden="true" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="data-table-pagination"><span>{filteredNotarias.length} de {notarias.length} notarías visibles</span><span>Catálogo maestro</span></div>
         </div>
       ) : filteredNotarias.length > 0 ? (
         <div className="notarias-grid grid gap-6">
@@ -921,6 +1027,7 @@ export default function NotariasList() {
           </form>
         </div>
       )}
+      {confirmationDialog}
 
     </div>
   );

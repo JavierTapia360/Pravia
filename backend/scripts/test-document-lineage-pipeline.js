@@ -118,7 +118,7 @@ async function testDocumentLineagePipeline() {
         nombre_interno: `doc_c1_${Date.now()}.pdf`,
         tipo: 'PRESUPUESTO_NOTARIA',
         categoria: 'PROYECTO',
-        storage_key: `cotizaciones/${cotizacion.id}/presupuesto_notaria_4.pdf`,
+        storage_key: `cotizaciones/${cotizacion.id}/presupuesto_notaria_demo.pdf`,
         mime_type: 'application/pdf',
         size_bytes: 512000,
         subido_por_id: user.id,

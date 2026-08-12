@@ -26,6 +26,8 @@ import {
   CreditCard,
   BookOpen
 } from 'lucide-react';
+import { api } from '../services/api';
+import { useConfirmation } from '../components/ui/ConfirmDialog';
 
 interface CargaTemporalBackend {
   id: string;
@@ -67,6 +69,7 @@ const ESTADOS_CIVILES = [
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export default function ComparecienteNuevo() {
+  const { requestConfirmation, confirmationDialog } = useConfirmation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const expedienteId = searchParams.get('expedienteId');
@@ -119,8 +122,7 @@ export default function ComparecienteNuevo() {
   } | null>(null);
 
   useEffect(() => {
-    fetch('/api/comparecientes/ia/status')
-      .then((res) => res.json())
+    api.get('/comparecientes/ia/status')
       .then((data) => setIaStatus(data))
       .catch(() => {});
   }, []);
@@ -341,20 +343,14 @@ export default function ComparecienteNuevo() {
     setErrorSesionDetalle(null);
 
     const idempotencyKey = crypto.randomUUID ? crypto.randomUUID() : `uuid_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    const endpointUrl = '/api/comparecientes/altas';
+    const endpointUrl = '/comparecientes/altas';
 
     try {
-      const res = await fetch(endpointUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tipo_persona: tipoPersona,
-          idempotency_key: idempotencyKey,
-          origen_expediente_id: expedienteId || null
-        })
+      const data = await api.post(endpointUrl, {
+        tipo_persona: tipoPersona,
+        idempotency_key: idempotencyKey,
+        origen_expediente_id: expedienteId || null
       });
-
-      const data = await res.json();
       const sessionData = data?.session ?? data?.sesion;
       const newSessionId = sessionData?.id;
 
@@ -373,7 +369,7 @@ export default function ComparecienteNuevo() {
       console.error('[ALTA COMPARECIENTE] Error al crear sesión:', err);
       setEstadoSesion('ERROR');
       setErrorSesionDetalle({
-        endpoint: endpointUrl,
+        endpoint: `/api${endpointUrl}`,
         mensaje: err.message || 'Error de conexión con el servidor backend'
       });
     }
@@ -389,13 +385,18 @@ export default function ComparecienteNuevo() {
   };
 
   const handleCancelarSesion = async () => {
-    const confirmar = window.confirm('¿Deseas cancelar esta alta y eliminar los documentos temporales?');
+    const confirmar = await requestConfirmation({
+      title: 'Cancelar alta de compareciente',
+      description: 'Se descartará la sesión de captura y se programará la limpieza de sus documentos temporales. Los registros maestros existentes no se modificarán.',
+      confirmLabel: 'Cancelar alta',
+      tone: 'danger',
+    });
     if (!confirmar) return;
 
     try {
       const sid = sessionId || localStorage.getItem('pravia_alta_session_id');
       if (sid && UUID_REGEX.test(sid)) {
-        await fetch(`/api/comparecientes/altas/${sid}`, { method: 'DELETE' });
+        await api.delete(`/comparecientes/altas/${sid}`);
       }
     } catch (err) {
       console.error('Error al cancelar sesión:', err);
@@ -416,14 +417,13 @@ export default function ComparecienteNuevo() {
       return;
     }
 
-    const endpointUrl = `/api/comparecientes/altas/${sid}`;
+    const endpointUrl = `/comparecientes/altas/${sid}`;
     try {
-      const res = await fetch(endpointUrl);
-      const data = await res.json();
+      const data = await api.get(endpointUrl);
       const sessionData = data?.session ?? data?.sesion;
       const verifiedId = sessionData?.id;
 
-      if (res.ok && typeof verifiedId === 'string' && UUID_REGEX.test(verifiedId)) {
+      if (typeof verifiedId === 'string' && UUID_REGEX.test(verifiedId)) {
         setSessionId(verifiedId);
         setEstadoSesion('ACTIVA');
         setErrorSesionDetalle(null);
@@ -484,15 +484,10 @@ export default function ComparecienteNuevo() {
         formData.append('archivo', file);
         formData.append('tipo_documento', detectarClasificacion(file.name));
 
-        const res = await fetch(`/api/comparecientes/altas/${sid}/documentos`, {
-          method: 'POST',
-          body: formData
-        });
+        const data = await api.upload(`/comparecientes/altas/${sid}/documentos`, formData);
 
-        const data = await res.json();
-
-        if (!res.ok || (!data.ok && !data.success)) {
-          const errMsg = data.error || data.message || `HTTP ${res.status}: Error al persistir en backend`;
+        if (!data.ok && !data.success) {
+          const errMsg = data.error || data.message || 'No fue posible guardar el documento.';
           setCargas((prev) =>
             prev.map((item) =>
               item.id === tempOptimisticId
@@ -567,11 +562,7 @@ export default function ComparecienteNuevo() {
 
     if (sessionId && UUID_REGEX.test(sessionId)) {
       try {
-        await fetch(`/api/comparecientes/altas/${sessionId}/documentos/${cargaId}/clasificar`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tipo_documento: nuevoTipo })
-        });
+        await api.put(`/comparecientes/altas/${sessionId}/documentos/${cargaId}/clasificar`, { tipo_documento: nuevoTipo });
       } catch (err) {
         console.error('Error actualizando clasificación:', err);
       }
@@ -606,11 +597,7 @@ export default function ComparecienteNuevo() {
     });
 
     try {
-      const res = await fetch(`/api/comparecientes/altas/${sid}/documentos/${doc.id}/stream`);
-      if (!res.ok) {
-        throw new Error(`Error HTTP ${res.status} al obtener documento`);
-      }
-      const blob = await res.blob();
+      const blob = await api.blob(`/comparecientes/altas/${sid}/documentos/${doc.id}/stream`);
       const blobUrl = URL.createObjectURL(blob);
       setDocVisorSeleccionado({
         id: doc.id,
@@ -643,9 +630,7 @@ export default function ComparecienteNuevo() {
     if (!sid || !UUID_REGEX.test(sid)) return;
 
     try {
-      await fetch(`/api/comparecientes/altas/${sid}/documentos/${id}`, {
-        method: 'DELETE'
-      });
+      await api.delete(`/comparecientes/altas/${sid}/documentos/${id}`);
       await cargarSesionActual(sid);
     } catch (err) {
       console.error('[ALTA COMPARECIENTE] Error eliminando temporal:', err);
@@ -695,20 +680,14 @@ export default function ComparecienteNuevo() {
         tipo_documento: c.tipo_documento
       }));
 
-      const res = await fetch(`/api/comparecientes/altas/${sessionId}/extraer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentos: payloadDocs,
-          tipo_persona: tipoPersona
-        })
+      const data = await api.post(`/comparecientes/altas/${sessionId}/extraer`, {
+        documentos: payloadDocs,
+        tipo_persona: tipoPersona
       });
-
-      const data = await res.json();
       setPasoIA('Prellenando formulario...');
       await new Promise((r) => setTimeout(r, 300));
 
-      if (res.ok && (data.ok || data.success) && data.borrador_actualizado) {
+      if ((data.ok || data.success) && data.borrador_actualizado) {
         const b = data.borrador_actualizado;
         const resIA = data.resultado || {};
 
@@ -930,14 +909,8 @@ export default function ComparecienteNuevo() {
         documentos_integrar: idsIntegrar
       };
 
-      const res = await fetch(`/api/comparecientes/altas/${sid}/confirmar`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await res.json();
-      if (res.ok && (data.ok || data.success) && data.compareciente) {
+      const data = await api.post(`/comparecientes/altas/${sid}/confirmar`, payload);
+      if ((data.ok || data.success) && data.compareciente) {
         localStorage.removeItem('pravia_alta_session_id');
         localStorage.removeItem('comparecienteAltaSessionId');
         sessionStorage.removeItem('pravia_alta_session_id');
@@ -948,7 +921,7 @@ export default function ComparecienteNuevo() {
           docsIntegrados: data.docs_integrados_count || idsIntegrar.length
         });
       } else {
-        throw new Error(data.error || data.message || `HTTP ${res.status}: Error al registrar compareciente`);
+        throw new Error(data.error || data.message || 'No fue posible registrar el compareciente.');
       }
     } catch (err: any) {
       setFeedbackMsg({ tipo: 'error', texto: `Falló el guardado: ${err.message}` });
@@ -2498,6 +2471,7 @@ export default function ComparecienteNuevo() {
           </div>
         </div>
       )}
+      {confirmationDialog}
     </div>
   );
 }

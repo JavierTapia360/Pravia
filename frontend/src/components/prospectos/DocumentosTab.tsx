@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Upload, FileText, Trash2, Download, Loader2, Eye, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { useToastStore } from '../../stores/toastStore';
+import { useConfirmation } from '../ui/ConfirmDialog';
 
 interface Documento {
   id: string;
@@ -25,6 +26,7 @@ export function DocumentosTab({ prospectoId }: Props) {
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const toast = useToastStore();
+  const { requestConfirmation, confirmationDialog } = useConfirmation();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [uploadData, setUploadData] = useState<{ file: File | null; tipo: string; observaciones: string }>({
@@ -65,15 +67,7 @@ export function DocumentosTab({ prospectoId }: Props) {
       formData.append('tipo', uploadData.tipo);
       formData.append('observaciones', uploadData.observaciones);
       formData.append('prospecto_id', prospectoId);
-      
-      // We will hardcode user_id for now until we have real auth
-      const fakeUser = await api.get('/prospectos').then(res => res[0]?.atendido_por?.id || '8127559a-e44f-4f44-97de-cbebc68d7cd3').catch(() => '8127559a-e44f-4f44-97de-cbebc68d7cd3');
-      formData.append('user_id', fakeUser); 
-
-      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/documentos`, {
-        method: 'POST',
-        body: formData,
-      });
+      await api.upload('/documentos', formData);
 
       toast.add('Documento subido correctamente.', 'success');
       setUploadData({ file: null, tipo: '', observaciones: '' });
@@ -96,9 +90,15 @@ export function DocumentosTab({ prospectoId }: Props) {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('¿Estás seguro de eliminar este documento?')) return;
+    const accepted = await requestConfirmation({
+      title: 'Desvincular documento',
+      description: 'El documento dejará de aparecer en este prospecto. El archivo maestro y su trazabilidad se conservarán.',
+      confirmLabel: 'Desvincular',
+      tone: 'warning',
+    });
+    if (!accepted) return;
     try {
-      await api.delete(`/documentos/${id}`);
+      await api.delete(`/prospectos/${prospectoId}/documentos/${id}`);
       toast.add('Documento eliminado.', 'info');
       setDocumentos(prev => prev.filter(d => d.id !== id));
     } catch (error) {
@@ -113,12 +113,12 @@ export function DocumentosTab({ prospectoId }: Props) {
   };
 
   return (
-    <div className="prospect-documents">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
       {/* Upload Zone */}
-      <div className="surface-card prospect-upload">
-        <div className="form-section-title">Nuevo documento</div>
+      <div className="glass-card" style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Nuevo Documento</div>
         
-        <div className="form-grid">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
           <div>
             <select className="input-field" value={uploadData.tipo} onChange={e => setUploadData(p => ({ ...p, tipo: e.target.value }))}>
               <option value="">Seleccionar Tipo...</option>
@@ -130,7 +130,7 @@ export function DocumentosTab({ prospectoId }: Props) {
           </div>
         </div>
 
-        <div className="prospect-upload__file">
+        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
           <input 
             type="file" 
             ref={fileInputRef} 
@@ -157,7 +157,7 @@ export function DocumentosTab({ prospectoId }: Props) {
 
       {/* List */}
       <div>
-        <div className="form-section-title">Documentos adjuntos ({documentos.length})</div>
+        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 'var(--space-3)' }}>Documentos Adjuntos ({documentos.length})</div>
         
         {isLoading ? (
           <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--text-muted)' }}>Cargando documentos...</div>
@@ -166,16 +166,16 @@ export function DocumentosTab({ prospectoId }: Props) {
             No hay documentos cargados en este prospecto.
           </div>
         ) : (
-          <div className="prospect-document-list">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
             {documentos.map(doc => (
-              <div key={doc.id} className="prospect-document-row">
-                <div className="prospect-document-row__identity">
+              <div key={doc.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'var(--space-3)', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
                   <div style={{ width: 36, height: 36, borderRadius: 'var(--radius-sm)', background: 'color-mix(in srgb, var(--color-primary) 15%, transparent)', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <FileText size={18} />
                   </div>
                   <div>
                     <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)' }}>{doc.tipo}</div>
-                    <div className="prospect-document-row__meta">
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span style={{ maxWidth: '150px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{doc.nombre_original}</span>
                       <span>•</span>
                       <span>{formatSize(doc.size_bytes)}</span>
@@ -184,7 +184,7 @@ export function DocumentosTab({ prospectoId }: Props) {
                     </div>
                   </div>
                 </div>
-                <div className="prospect-document-row__actions">
+                <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
                   <button className="btn-icon" onClick={() => handlePreview(doc)} title="Ver / Descargar">
                     <Eye size={16} />
                   </button>
@@ -198,6 +198,11 @@ export function DocumentosTab({ prospectoId }: Props) {
         )}
       </div>
 
+      <style>{`
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
+      {confirmationDialog}
     </div>
   );
 }

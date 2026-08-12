@@ -20,7 +20,11 @@ import {
   updateExpedienteDocumento,
   streamExpedienteDocumento,
   downloadExpedienteDocumento,
-  getTiposActo
+  getTiposActo,
+  registerFinalDelivery,
+  createPostfirmaTask,
+  updatePostfirmaTask,
+  transitionPostfirma,
 } from '../controllers/expedientes.controller';
 
 import {
@@ -49,6 +53,10 @@ router.post('/', createExpediente);
 router.patch('/:id', updateExpedienteHeader);
 router.post('/convertir-cotizacion', convertCotizacionToExpediente);
 router.post('/:id/transicion-estatus', transitionEstatus);
+router.post('/:id/entrega', registerFinalDelivery);
+router.post('/:id/postfirma/tramites', createPostfirmaTask);
+router.patch('/:id/postfirma/tramites/:taskId', updatePostfirmaTask);
+router.post('/:id/postfirma/transicion', transitionPostfirma);
 
 // Financial movements
 router.post('/:id/movimientos', requirePermission('finanzas.write'), addMovimientoFinanciero);
@@ -69,15 +77,15 @@ router.get('/:id/documentos/:documentoId/visualizar', streamExpedienteDocumento)
 router.get('/:id/documentos/:documentoId/descargar', downloadExpedienteDocumento);
 
 // Proyecto de Escritura & IA Analysis Reports
-router.get('/:id/proyecto', getProyectoEscritura);
-router.get('/:id/proyecto/matriz-datos', getDatosDetectadosMatrix);
+router.get('/:id/proyecto', requirePermission('expedientes.project.read'), getProyectoEscritura);
+router.get('/:id/proyecto/matriz-datos', requirePermission('expedientes.project.read'), getDatosDetectadosMatrix);
 router.post('/:id/proyecto/generar-ia', requirePermission('ia.execute'), generarProyectoConIA);
 router.post('/:id/proyecto/upload', uploadProyectoMulter.single('file'), uploadProyectoVersion);
 router.patch('/:id/proyecto/versions/:versionId', updateProyectoVersion);
-router.get('/:id/proyecto/versions/:versionId/visualizar', streamProyectoVersion);
-router.get('/:id/proyecto/versions/:versionId/descargar', downloadProyectoVersion);
+router.get('/:id/proyecto/versions/:versionId/visualizar', requirePermission('expedientes.project.read'), streamProyectoVersion);
+router.get('/:id/proyecto/versions/:versionId/descargar', requirePermission('expedientes.project.read'), downloadProyectoVersion);
 router.post('/:id/proyecto/analizar-ia', requirePermission('ia.execute'), analizarProyectoConIA);
-router.get('/:id/proyecto/reporte-ia/visualizar', streamIAReport);
-router.get('/:id/proyecto/reporte-ia/descargar', downloadIAReport);
+router.get('/:id/proyecto/reporte-ia/visualizar', requirePermission('expedientes.project.read'), streamIAReport);
+router.get('/:id/proyecto/reporte-ia/descargar', requirePermission('expedientes.project.read'), downloadIAReport);
 
 export default router;

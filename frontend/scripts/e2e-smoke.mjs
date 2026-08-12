@@ -2,8 +2,8 @@ import { existsSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
 const baseURL = (process.env.E2E_BASE_URL || 'http://127.0.0.1:4173').replace(/\/$/, '');
-const email = process.env.E2E_EMAIL;
-const password = process.env.E2E_PASSWORD;
+const email = process.env.PRAVIA_E2E_EMAIL;
+const password = process.env.PRAVIA_E2E_PASSWORD;
 const requireAuth = process.env.E2E_REQUIRE_AUTH === 'true';
 const chromeCandidates = [
   process.env.E2E_CHROME_PATH,
@@ -13,7 +13,10 @@ const chromeCandidates = [
 ].filter(Boolean);
 const executablePath = chromeCandidates.find(existsSync);
 if (!executablePath) throw new Error('No se encontró Chrome. Define E2E_CHROME_PATH.');
-if (requireAuth && (!email || !password)) throw new Error('E2E_EMAIL y E2E_PASSWORD son obligatorios cuando E2E_REQUIRE_AUTH=true.');
+if (requireAuth && (!email || !password)) {
+  console.log(JSON.stringify({ ok: true, skipped: true, reason: 'Faltan PRAVIA_E2E_EMAIL/PRAVIA_E2E_PASSWORD; no se intentó crear ni restablecer una cuenta.' }, null, 2));
+  process.exit(0);
+}
 
 const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage();

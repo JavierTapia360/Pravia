@@ -38,9 +38,10 @@ npm run build
 npm run check:bundle
 npm run check:pwa
 npm run e2e:smoke
+npm run e2e:visual
 ```
 
-`npm test` excluye deliberadamente `src/integration`: una prueba unitaria nunca debe pasar o fallar según la red. `test:integration` es de solo lectura y requiere una URL autorizada. `e2e:critical` crea información sintética y se niega a arrancar salvo que se declare `E2E_ALLOW_MUTATIONS=isolated-database-confirmed`; además rechaza hosts externos que no estén marcados como rama efímera.
+`npm test` excluye deliberadamente `src/integration`: una prueba unitaria nunca debe pasar o fallar según la red. `test:integration` es de solo lectura y requiere una URL autorizada. Las pruebas autenticadas reciben exclusivamente `PRAVIA_E2E_EMAIL` y `PRAVIA_E2E_PASSWORD`; si faltan, reportan `skipped` y no crean ni restablecen cuentas. `e2e:critical` además exige `E2E_ALLOW_MUTATIONS=isolated-database-confirmed` y rechaza destinos no locales/no efímeros.
 
 La prueba crítica recorre:
 

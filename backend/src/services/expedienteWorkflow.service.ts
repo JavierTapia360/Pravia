@@ -1,6 +1,12 @@
 import { PrismaClient, ExpedienteEstatus, Role, Prisma } from '@prisma/client';
 import { ExpedienteProgressService } from './expedienteProgress.service';
 import { assertExpedienteTransition, ExpedienteWorkflowError } from '../domain/expedienteWorkflow';
+import {
+  assertPostfirmaReadyForDelivery,
+  assertSpecializedTransition,
+  DeliveryInput,
+  validateDeliveryInput,
+} from '../domain/expedienteAuthorization';
 
 export interface TransicionPayload {
   expedienteId: string;
@@ -10,11 +16,13 @@ export interface TransicionPayload {
   actorUserId: string;
   correlationId?: string;
   observaciones?: string;
+  fechaEfectiva?: Date;
   datosFirma?: {
     fechaFirma: Date;
     lugar: string;
     autorizaSaldoPendiente?: boolean;
   };
+  entrega?: DeliveryInput;
 }
 
 export interface ReabrirPayload {
@@ -54,7 +62,10 @@ export class ExpedienteWorkflowService {
         include: {
           requisitos_docs: true,
           comparecientes: { include: { compareciente: true } },
-          cotizacion: true
+          cotizacion: true,
+          flujoVersion: true,
+          expedienteDocumentos: { where: { estatus: 'ACTIVO' }, select: { documento_id: true } },
+          tareas_externas: { select: { estatus: true } },
         }
       });
 
@@ -70,29 +81,27 @@ export class ExpedienteWorkflowService {
       }
 
       // 4. Validar matriz de permisos por rol autenticado
-      this.validarPermisosRol(actorUser.rol, exp.estatus, payload.nuevoEstatus);
+      assertSpecializedTransition(actorUser.rol, exp.estatus, payload.nuevoEstatus);
 
-      // 5. Validar plantilla de etapa desde la versión del flujo si se especificó nueva etapa
+      // 5. Validar exclusivamente contra la versión congelada del flujo.
       let flujoEtapaSnapshot: any = null;
       if (payload.nuevaEtapaClave) {
-        if (!exp.tipo_acto_id) {
-          throw new Error('El expediente no tiene configurado un Tipo de Acto válido');
-        }
-
-        flujoEtapaSnapshot = await tx.flujoEtapa.findFirst({
-          where: {
-            tipo_acto_id: exp.tipo_acto_id,
-            clave: payload.nuevaEtapaClave,
-            activa: true
-          }
-        });
+        const frozenStages = Array.isArray(exp.flujoVersion?.etapas_json)
+          ? exp.flujoVersion.etapas_json as Array<Record<string, any>>
+          : [];
+        flujoEtapaSnapshot = frozenStages.find((stage) => stage.clave === payload.nuevaEtapaClave);
 
         if (!flujoEtapaSnapshot) {
-          throw new Error(`La etapa '${payload.nuevaEtapaClave}' no existe o no está activa en la plantilla del Tipo de Acto`);
+          throw new ExpedienteWorkflowError(
+            `La etapa '${payload.nuevaEtapaClave}' no pertenece a la versión de flujo congelada del expediente.`,
+            'EXPEDIENTE_FROZEN_STAGE_NOT_FOUND',
+            409,
+          );
         }
 
         const effectiveStatus = payload.nuevoEstatus || exp.estatus;
-        if (flujoEtapaSnapshot.estado_general_relacionado !== effectiveStatus) {
+        const frozenStatus = flujoEtapaSnapshot.estado || flujoEtapaSnapshot.estado_general_relacionado;
+        if (frozenStatus !== effectiveStatus) {
           throw new ExpedienteWorkflowError(
             `La etapa '${flujoEtapaSnapshot.nombre}' no corresponde al estado seleccionado.`,
             'EXPEDIENTE_STAGE_STATUS_MISMATCH',
@@ -106,15 +115,12 @@ export class ExpedienteWorkflowService {
             throw new ExpedienteWorkflowError('No se puede regresar o repetir una etapa por el flujo ordinario.', 'EXPEDIENTE_STAGE_BACKWARD', 409);
           }
           if (currentStage) {
-            const mandatoryBetween = await tx.flujoEtapa.count({
-              where: {
-                tipo_acto_id: exp.tipo_acto_id,
-                activa: true,
-                orden: { gt: currentStage.orden_snapshot, lt: flujoEtapaSnapshot.orden },
-                obligatoria: true,
-                se_puede_omitir: false,
-              }
-            });
+            const mandatoryBetween = frozenStages.filter((stage) =>
+              Number(stage.orden) > currentStage.orden_snapshot
+              && Number(stage.orden) < Number(flujoEtapaSnapshot.orden)
+              && stage.obligatoria === true
+              && stage.se_puede_omitir !== true,
+            ).length;
             if (mandatoryBetween > 0) {
               throw new ExpedienteWorkflowError(
                 `Hay ${mandatoryBetween} etapa(s) obligatoria(s) antes de '${flujoEtapaSnapshot.nombre}'.`,
@@ -130,10 +136,26 @@ export class ExpedienteWorkflowService {
       if (payload.nuevoEstatus === 'FIRMA_PROGRAMADA') {
         this.validarRequisitosFirma(exp, payload.datosFirma);
       }
-      if (payload.nuevoEstatus === 'ENTREGADO' && !payload.observaciones?.trim()) {
+      if (payload.nuevoEstatus === 'LISTO_ENTREGA') {
+        assertPostfirmaReadyForDelivery(
+          exp.tareas_externas,
+          exp.requisitos_docs.map((item) => ({
+            obligatorio: item.obligatorio,
+            validado: item.estatus === 'VALIDADO',
+            omitido: item.estatus === 'OMITIDO_JUSTIFICADO',
+          })),
+        );
+      }
+      if (payload.nuevoEstatus === 'ENTREGADO') {
+        if (!payload.entrega) {
+          throw new ExpedienteWorkflowError('Registra la entrega desde la acción de entrega final.', 'EXPEDIENTE_DELIVERY_DATA_REQUIRED');
+        }
+        validateDeliveryInput(payload.entrega, new Set(exp.expedienteDocumentos.map((item) => item.documento_id)));
+      }
+      if (payload.nuevoEstatus && ['FIRMADO', 'ENTREGADO'].includes(payload.nuevoEstatus) && !payload.fechaEfectiva) {
         throw new ExpedienteWorkflowError(
-          'Registra en observaciones a quién se entregó y la evidencia disponible.',
-          'EXPEDIENTE_DELIVERY_EVIDENCE_REQUIRED',
+          'Registra la fecha efectiva en que ocurrió la firma o entrega.',
+          'EXPEDIENTE_EFFECTIVE_DATE_REQUIRED',
         );
       }
 
@@ -177,12 +199,12 @@ export class ExpedienteWorkflowService {
         const nuevaEtapa = await tx.expedienteEtapa.create({
           data: {
             expediente_id: exp.id,
-            flujo_etapa_id: flujoEtapaSnapshot.id,
+            flujo_etapa_id: null,
             flujo_version_id: exp.flujo_version_id,
             clave_snapshot: flujoEtapaSnapshot.clave,
             nombre_snapshot: flujoEtapaSnapshot.nombre,
             orden_snapshot: flujoEtapaSnapshot.orden,
-            duracion_esperada_snapshot: flujoEtapaSnapshot.duracion_esperada_dias,
+            duracion_esperada_snapshot: flujoEtapaSnapshot.duracion ?? flujoEtapaSnapshot.duracion_esperada_dias,
             responsable_id: actorUser.id,
             observaciones: payload.observaciones
           }
@@ -214,8 +236,8 @@ export class ExpedienteWorkflowService {
           expediente_etapa_actual_id: nuevaEtapaInstanciaId,
           etapa_actual_nombre: nuevaEtapaNombre,
           fecha_estimada_firma: payload.datosFirma?.fechaFirma || exp.fecha_estimada_firma,
-          fecha_real_firma: payload.nuevoEstatus === 'FIRMADO' ? new Date() : exp.fecha_real_firma,
-          fecha_entrega_cliente: payload.nuevoEstatus === 'ENTREGADO' ? new Date() : exp.fecha_entrega_cliente,
+          fecha_real_firma: payload.nuevoEstatus === 'FIRMADO' ? payload.fechaEfectiva : exp.fecha_real_firma,
+          fecha_entrega_cliente: payload.nuevoEstatus === 'ENTREGADO' ? payload.fechaEfectiva : exp.fecha_entrega_cliente,
           datos_operacion: payload.datosFirma?.lugar
             ? {
                 ...((exp.datos_operacion && typeof exp.datos_operacion === 'object' && !Array.isArray(exp.datos_operacion))
@@ -235,6 +257,22 @@ export class ExpedienteWorkflowService {
 
       if (updateResult.count === 0) {
         throw new Error(`[409 CONFLICT] El expediente ha sido modificado por otro usuario (Versión esperada: ${payload.versionActual}). Por favor recargue.`);
+      }
+
+      if (payload.nuevoEstatus === 'ENTREGADO' && payload.entrega) {
+        await tx.expedienteEntrega.create({
+          data: {
+            expediente_id: exp.id,
+            receptor_nombre: payload.entrega.receptor_nombre.trim(),
+            receptor_caracter: payload.entrega.receptor_caracter.trim(),
+            fecha_efectiva: payload.entrega.fecha_efectiva,
+            medio: payload.entrega.medio.trim(),
+            items: payload.entrega.items as unknown as Prisma.InputJsonValue,
+            evidencia_documento_id: payload.entrega.evidencia_documento_id,
+            observaciones: payload.entrega.observaciones?.trim() || null,
+            registrado_por_id: actorUser.id,
+          },
+        });
       }
 
       // 9. Calcular avances con el estado EFECTIVO post-transición dentro de la transacción
@@ -268,7 +306,7 @@ export class ExpedienteWorkflowService {
             estatus_anterior: exp.estatus,
             estatus_nuevo: payload.nuevoEstatus,
             user_id: actorUser.id,
-            fecha_efectiva: new Date(),
+            fecha_efectiva: payload.fechaEfectiva || new Date(),
             notas: payload.observaciones?.trim() || null,
           }
         });
@@ -387,24 +425,6 @@ export class ExpedienteWorkflowService {
 
       return expActualizado;
     });
-  }
-
-  private validarPermisosRol(rol: Role, estatusActual: ExpedienteEstatus, nuevoEstatus?: ExpedienteEstatus) {
-    if (!nuevoEstatus || estatusActual === nuevoEstatus) return;
-
-    if (rol === 'RECEPCION') {
-      // Recepción únicamente puede realizar entrega final
-      if (estatusActual !== 'LISTO_ENTREGA' || nuevoEstatus !== 'ENTREGADO') {
-        throw new Error('El rol RECEPCION únicamente tiene autorización para registrar entregas finales');
-      }
-    }
-
-    if (rol === 'GESTORIA') {
-      const permitidos: ExpedienteEstatus[] = ['FIRMADO', 'POST_FIRMA', 'LISTO_ENTREGA'];
-      if (!permitidos.includes(nuevoEstatus)) {
-        throw new Error(`El rol GESTORIA no tiene permisos para transicionar al estado '${nuevoEstatus}'`);
-      }
-    }
   }
 
   private validarRequisitosFirma(exp: any, datosFirma?: any) {

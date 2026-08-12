@@ -56,14 +56,9 @@ export class ComparecienteAltaSessionService {
   }) {
     const { usuario_id, tipo_persona, idempotency_key, origen_expediente_id, correlation_id } = params;
 
-    let finalUsuarioId = usuario_id;
     const userExists = await prisma.user.findUnique({ where: { id: usuario_id } });
-    if (!userExists) {
-      const firstUser = await prisma.user.findFirst();
-      if (firstUser) {
-        finalUsuarioId = firstUser.id;
-      }
-    }
+    if (!userExists?.activo) throw new Error('La sesión no corresponde a un usuario activo.');
+    const finalUsuarioId = usuario_id;
 
     if (idempotency_key) {
       const sesionExistente = await prisma.comparecienteAltaSession.findUnique({

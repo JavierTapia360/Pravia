@@ -3,6 +3,7 @@ import { EventoAgendaEstatus, Prisma } from '@prisma/client';
 import prisma from '../config/prisma';
 import { AgendaError, canAssignAgendaResponsibility, canManageAgendaTeam, normalizeAgendaType, normalizeReminders, parseAgendaRange } from '../domain/agenda';
 import { expedienteAccessWhere } from '../middleware/auth.middleware';
+import { comparecienteObjectWhere } from '../services/objectAccess.service';
 
 const EVENT_COLORS: Record<string, string> = {
   PERSONAL: '#64748b',
@@ -25,13 +26,13 @@ async function requireActiveUser(id: unknown, label: string) {
   return user.id;
 }
 
-async function validateAgendaLinks(input: { expedienteId?: unknown; comparecienteId?: unknown }) {
+async function validateAgendaLinks(input: { expedienteId?: unknown; comparecienteId?: unknown }, user: NonNullable<Request['user']>) {
   const [expediente, compareciente] = await Promise.all([
     input.expedienteId
-      ? prisma.expediente.findFirst({ where: { id: String(input.expedienteId), archived_at: null }, select: { id: true } })
+      ? prisma.expediente.findFirst({ where: { id: String(input.expedienteId), archived_at: null, ...expedienteAccessWhere(user) }, select: { id: true } })
       : null,
     input.comparecienteId
-      ? prisma.compareciente.findFirst({ where: { id: String(input.comparecienteId), archived_at: null }, select: { id: true } })
+      ? prisma.compareciente.findFirst({ where: { id: String(input.comparecienteId), archived_at: null, ...comparecienteObjectWhere(user) }, select: { id: true } })
       : null,
   ]);
   if (input.expedienteId && !expediente) throw new AgendaError('El expediente vinculado no está activo.', 'AGENDA_EXPEDIENTE_INVALID', 404);
@@ -97,7 +98,8 @@ export class AgendaController {
       if (title.length < 3 || title.length > 180) throw new AgendaError('El título debe tener entre 3 y 180 caracteres.', 'TASK_TITLE_INVALID');
       const priority = String(req.body.prioridad || 'MEDIA').toUpperCase();
       if (!['BAJA', 'MEDIA', 'ALTA', 'URGENTE'].includes(priority)) throw new AgendaError('La prioridad de la tarea no es válida.', 'TASK_PRIORITY_INVALID');
-      const links = await validateAgendaLinks({ expedienteId: req.body.expediente_id });
+      if (!req.user) throw new AgendaError('Inicia sesión para continuar.', 'AUTH_REQUIRED', 401);
+      const links = await validateAgendaLinks({ expedienteId: req.body.expediente_id }, req.user);
       const deadline = req.body.fecha_limite ? new Date(req.body.fecha_limite) : null;
       if (deadline && Number.isNaN(deadline.getTime())) throw new AgendaError('La fecha límite no es válida.', 'TASK_DEADLINE_INVALID');
       const task = await prisma.$transaction(async (tx) => {
@@ -266,7 +268,8 @@ export class AgendaController {
       const tipo = normalizeAgendaType(req.body.tipo);
       const range = parseAgendaRange({ fechaInicio: req.body.fecha_inicio, fechaFin: req.body.fecha_fin, todoElDia: req.body.todo_el_dia });
       const reminders = normalizeReminders(req.body.recordatorios);
-      const links = await validateAgendaLinks({ expedienteId: req.body.expediente_id, comparecienteId: req.body.compareciente_id });
+      if (!req.user) throw new AgendaError('Inicia sesión para continuar.', 'AUTH_REQUIRED', 401);
+      const links = await validateAgendaLinks({ expedienteId: req.body.expediente_id, comparecienteId: req.body.compareciente_id }, req.user);
       const idempotencyKey = String(req.body.idempotency_key || '').trim() || null;
 
       const result = await prisma.$transaction(async (tx) => {
@@ -333,10 +336,11 @@ export class AgendaController {
       const responsableId = req.body.responsable_id
         ? await requireActiveUser(req.body.responsable_id, 'El responsable')
         : current.user_id;
+      if (!req.user) throw new AgendaError('Inicia sesión para continuar.', 'AUTH_REQUIRED', 401);
       const links = await validateAgendaLinks({
         expedienteId: req.body.expediente_id === undefined ? current.expediente_id : req.body.expediente_id,
         comparecienteId: req.body.compareciente_id === undefined ? current.compareciente_id : req.body.compareciente_id,
-      });
+      }, req.user);
       const range = parseAgendaRange({
         fechaInicio: req.body.fecha_inicio || current.fecha_inicio,
         fechaFin: req.body.fecha_fin === undefined ? current.fecha_fin : req.body.fecha_fin,

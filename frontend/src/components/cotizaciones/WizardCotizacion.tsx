@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ChevronRight, ChevronLeft, Building2, User, FileText, Send, CheckCircle2, Copy, Mail, AlertTriangle, Plus } from 'lucide-react';
 import { api } from '../../services/api';
+import { useConfirmation } from '../ui/ConfirmDialog';
+import { useToastStore } from '../../stores/toastStore';
 
 interface WizardCotizacionProps {
   isOpen: boolean;
@@ -14,6 +16,7 @@ interface WizardCotizacionProps {
 // MAIN WIZARD COMPONENT
 // ─────────────────────────────────────────────────────
 export default function WizardCotizacion({ isOpen, onClose, onSuccess, initialProspectoId }: WizardCotizacionProps) {
+  const { requestConfirmation, confirmationDialog } = useConfirmation();
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -48,9 +51,14 @@ export default function WizardCotizacion({ isOpen, onClose, onSuccess, initialPr
   const nextStep = () => setCurrentStep(prev => Math.min(prev + 1, 5));
   const prevStep = () => setCurrentStep(prev => Math.max(prev - 1, 1));
 
-  const handleClose = () => {
+  const handleClose = async () => {
     if (currentStep > 1) {
-      const choice = window.confirm('¿Desea descartar el progreso de esta solicitud?');
+      const choice = await requestConfirmation({
+        title: 'Descartar progreso',
+        description: 'Los datos capturados en esta solicitud todavía no se han guardado.',
+        confirmLabel: 'Descartar y cerrar',
+        tone: 'warning',
+      });
       if (choice) onClose();
     } else {
       onClose();
@@ -67,10 +75,8 @@ export default function WizardCotizacion({ isOpen, onClose, onSuccess, initialPr
     setSubmitError(null);
 
     try {
-      const userId = localStorage.getItem('pravia_user_id') || undefined;
       await api.post('/cotizaciones', {
         prospecto_id: selectedProspecto.id,
-        user_id: userId,
         notaria_id: selectedNotaria?.id || null,
       });
       onSuccess();
@@ -87,7 +93,8 @@ export default function WizardCotizacion({ isOpen, onClose, onSuccess, initialPr
     (currentStep === 2 && !selectedNotaria);
 
   return createPortal(
-    <div className="quote-wizard-backdrop" style={{
+    <>
+    <div style={{
       position: 'fixed',
       top: 0, left: 0, right: 0, bottom: 0,
       width: '100vw',
@@ -100,7 +107,7 @@ export default function WizardCotizacion({ isOpen, onClose, onSuccess, initialPr
       justifyContent: 'center',
       padding: '24px'
     }}>
-      <div className="quote-wizard-dialog" style={{
+      <div style={{
         width: 'min(1140px, calc(100vw - 48px))',
         height: 'min(780px, calc(100vh - 48px))',
         maxWidth: '1140px',
@@ -146,7 +153,7 @@ export default function WizardCotizacion({ isOpen, onClose, onSuccess, initialPr
           background: 'var(--bg-primary)',
           flexShrink: 0
         }}>
-          <div className="quote-wizard-steps" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
             {steps.map((step) => {
               const Icon = step.icon;
               const isActive = currentStep === step.id;
@@ -277,7 +284,9 @@ export default function WizardCotizacion({ isOpen, onClose, onSuccess, initialPr
         </div>
 
       </div>
-    </div>,
+    </div>
+    {confirmationDialog}
+    </>,
     document.body
   );
 }
@@ -319,7 +328,7 @@ function Step1Prospecto({ selected, onSelect, initialProspectoId }: { selected: 
   });
 
   return (
-    <div className="quote-wizard-two-column" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 'var(--space-6)', height: '100%' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 'var(--space-6)', height: '100%' }}>
       
       {/* Panel Izquierdo — Lista y Buscador */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', minWidth: 0 }}>
@@ -392,7 +401,7 @@ function Step1Prospecto({ selected, onSelect, initialProspectoId }: { selected: 
         <div style={{ textAlign: 'center' }}>
           <button 
             type="button" 
-            onClick={() => alert('Función de creación rápida de prospecto disponible desde el módulo Prospectos.')}
+            onClick={() => useToastStore.getState().addToast('Crea el prospecto desde el módulo Prospectos para conservar el flujo y su trazabilidad.', 'info')}
             className="btn btn-secondary" 
             style={{ fontSize: '0.8rem' }}
           >
@@ -529,12 +538,12 @@ function Step2Notaria({ selected, onSelect }: { selected: any, onSelect: (n: any
       loadNotarias();
       handleSelect(newNotaria);
     } catch (err: any) {
-      alert(err.message || 'Error al registrar notaría');
+      useToastStore.getState().addToast(err.message || 'Error al registrar notaría', 'error');
     }
   };
 
   return (
-    <div className="quote-wizard-two-column" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 'var(--space-6)', height: '100%' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 'var(--space-6)', height: '100%' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', minWidth: 0 }}>
         
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

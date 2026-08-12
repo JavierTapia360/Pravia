@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuthStore } from '../../stores/authStore';
+import { useConfirmation } from '../ui/ConfirmDialog';
 
 interface CotizacionDetailProps {
   cotizacionId: string;
@@ -89,6 +90,7 @@ function formatDateMilestone(dateString?: string | null) {
 
 export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: CotizacionDetailProps) {
   const navigate = useNavigate();
+  const { requestConfirmation, confirmationDialog } = useConfirmation();
   const userRole = useAuthStore((state) => state.user?.rol);
   const canValidateAdvance = userRole === 'DIRECCION' || userRole === 'ADMINISTRACION';
 
@@ -323,7 +325,6 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
       formData.append('tipo', 'PRESUPUESTO_NOTARIA');
       formData.append('categoria', 'PROYECTO');
       formData.append('cotizacion_id', cotizacionId);
-      formData.append('user_id', cotizacion?.user_id || '8127559a-e44f-4f44-97de-cbebc68d7cd3');
 
       await api.upload('/documentos', formData);
 
@@ -520,7 +521,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
 
   const handleConfirmDeleteDocument = async (docId: string) => {
     try {
-      await api.delete(`/documentos/${docId}`);
+      await api.delete(`/cotizaciones/${cotizacionId}/documentos/${docId}`);
       setToastMessage('Documento eliminado correctamente.');
       setDeleteDocumentConfirm(null);
       loadCotizacion();
@@ -545,8 +546,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
         resultado: seguimientoResultado,
         proxima_accion: seguimientoProximaAccion,
         responsable: seguimientoResponsable,
-        fecha_proximo_seguimiento: seguimientoFechaProximo ? new Date(seguimientoFechaProximo).toISOString() : null,
-        user_id: cotizacion?.user_id
+        fecha_proximo_seguimiento: seguimientoFechaProximo ? new Date(seguimientoFechaProximo).toISOString() : null
       });
 
       setToastMessage('📋 Seguimiento registrado correctamente');
@@ -582,7 +582,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
   // Loading Guard
   if (isLoading || !cotizacion) {
     return createPortal(
-      <div className="quote-detail-backdrop" style={{
+      <div style={{
         position: 'fixed',
         top: 0, left: 0, right: 0, bottom: 0,
         width: '100vw', height: '100vh',
@@ -592,7 +592,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
         display: 'flex',
         justifyContent: 'flex-end'
       }}>
-        <div className="quote-detail-panel" style={{
+        <div style={{
           width: 'min(980px, 100vw)',
           height: '100vh',
           backgroundColor: 'var(--bg-secondary)',
@@ -668,7 +668,8 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
   ];
 
   return createPortal(
-    <div className="quote-detail-backdrop" style={{
+    <>
+    <div style={{
       position: 'fixed',
       top: 0, left: 0, right: 0, bottom: 0,
       width: '100vw', height: '100vh',
@@ -678,7 +679,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
       display: 'flex',
       justifyContent: 'flex-end'
     }}>
-      <div className="quote-detail-panel" style={{
+      <div style={{
         width: 'min(980px, 100vw)',
         height: '100vh',
         backgroundColor: 'var(--bg-secondary)',
@@ -1631,14 +1632,19 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
                             </button>
                             <button
                               onClick={async () => {
-                                if (confirm(`¿Desvincular "${doc.nombre_original}" de la Cotización? No se eliminará del Prospecto ni del almacenamiento.`)) {
-                                  try {
-                                    await api.delete(`/cotizaciones/${cotizacionId}/documentos/${doc.id}`);
-                                    setToastMessage('Documento desvinculado de la cotización exitosamente.');
-                                    loadCotizacion();
-                                  } catch (err: any) {
-                                    setToastMessage('Error al desvincular documento.');
-                                  }
+                                const accepted = await requestConfirmation({
+                                  title: 'Desvincular documento',
+                                  description: `“${doc.nombre_original}” dejará de aparecer en esta cotización. El prospecto, el archivo maestro y el almacenamiento se conservarán.`,
+                                  confirmLabel: 'Desvincular',
+                                  tone: 'warning',
+                                });
+                                if (!accepted) return;
+                                try {
+                                  await api.delete(`/cotizaciones/${cotizacionId}/documentos/${doc.id}`);
+                                  setToastMessage('Documento desvinculado de la cotización exitosamente.');
+                                  loadCotizacion();
+                                } catch (err: any) {
+                                  setToastMessage('Error al desvincular documento.');
                                 }
                               }}
                               className="btn btn-secondary"
@@ -1950,7 +1956,9 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
         </div>
       )}
 
-    </div>,
+    </div>
+    {confirmationDialog}
+    </>,
     document.body
   );
 }

@@ -126,15 +126,12 @@ export async function seedExpedientesConfig() {
     }
 
     // 4. Crear PlantillaDocumentalVersion V1
-    await prisma.plantillaDocumentalVersion.upsert({
-      where: {
-        tipo_acto_id_version: {
-          tipo_acto_id: tipoActo.id,
-          version: 1
-        }
-      },
-      update: {},
-      create: {
+    const existingTemplate = await prisma.plantillaDocumentalVersion.findFirst({
+      where: { tipo_acto_id: tipoActo.id, notaria_id: null, version: 1 },
+      select: { id: true },
+    });
+    if (!existingTemplate) {
+      await prisma.plantillaDocumentalVersion.create({ data: {
         tipo_acto_id: tipoActo.id,
         version: 1,
         creado_por_id: defaultAdmin.id,
@@ -148,8 +145,8 @@ export async function seedExpedientesConfig() {
           { nombre: 'Certificado de Libertad de Gravamen', categoria: 'REGISTRO', obligatorio: true },
           { nombre: 'Formulario de Identificación UIF', categoria: 'UIF', obligatorio: true }
         ]
-      }
-    });
+      } });
+    }
   }
 
   console.log('✅ Seeders iniciales del Motor de Expedientes ejecutados con éxito.');
