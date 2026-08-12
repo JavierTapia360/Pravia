@@ -3,13 +3,16 @@ import { basename } from 'node:path';
 import { readFileSync } from 'node:fs';
 
 const base = (process.env.E2E_API_URL || 'http://127.0.0.1:3001/api').replace(/\/$/, '');
-const email = process.env.E2E_EMAIL || '';
-const password = process.env.E2E_PASSWORD || '';
+const email = process.env.PRAVIA_E2E_EMAIL || '';
+const password = process.env.PRAVIA_E2E_PASSWORD || '';
 const allowed = process.env.E2E_ALLOW_MUTATIONS === 'isolated-database-confirmed';
 const targetKind = process.env.E2E_TARGET_KIND || 'local';
 
+if (!email || !password) {
+  console.log(JSON.stringify({ ok: true, skipped: true, reason: 'Faltan PRAVIA_E2E_EMAIL/PRAVIA_E2E_PASSWORD; no se creó ni restableció ninguna cuenta.' }, null, 2));
+  process.exit(0);
+}
 if (!allowed) throw new Error('E2E_ALLOW_MUTATIONS=isolated-database-confirmed es obligatorio. Esta prueba crea datos.');
-if (!email || !password) throw new Error('E2E_EMAIL y E2E_PASSWORD son obligatorios.');
 const hostname = new URL(base).hostname;
 if (!['localhost', '127.0.0.1', '::1'].includes(hostname) && targetKind !== 'ephemeral-branch') {
   throw new Error('Las mutaciones E2E solo se permiten en localhost o con E2E_TARGET_KIND=ephemeral-branch.');

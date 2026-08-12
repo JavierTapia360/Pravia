@@ -38,15 +38,16 @@ export const ExpedientesMetrics: React.FC<Props> = ({ expedientes }) => {
     return true;
   });
 
-  // Calculate PRAVIA fees exclusively (honorarios_pravia or 20% estimated of operational value if missing)
+  // Honorarios only come from an explicit PRAVIA budget. valor_operacion is
+  // never converted into fees, debt or expected cash.
   const honorariosFirmados = signedExpedientes.reduce((acc, e) => {
-    const fee = (e as any).honorarios_pravia || Number(e.valor_operacion || 0) * 0.15;
+    const fee = (e as any).honorarios_pravia ?? (e as any).datos_operacion?.presupuesto?.honorarios_pravia ?? 0;
     return acc + Number(fee);
   }, 0);
 
   const carteraExpedientes = expedientes.filter(isCartera);
   const honorariosCartera = carteraExpedientes.reduce((acc, e) => {
-    const fee = (e as any).honorarios_pravia || Number(e.valor_operacion || 0) * 0.15;
+    const fee = (e as any).honorarios_pravia ?? (e as any).datos_operacion?.presupuesto?.honorarios_pravia ?? 0;
     return acc + Number(fee);
   }, 0);
 

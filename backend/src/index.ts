@@ -24,6 +24,7 @@ import usersRoutes from './routes/users.routes';
 import storageRoutes from './routes/storage.routes';
 import { authenticate, authorizeByMethod, requirePasswordReady, requirePermission } from './middleware/auth.middleware';
 import { errorLogLevel, normalizeErrorBody } from './utils/httpError';
+import { getStorageCompensationHealth, storageCompensationWorker } from './workers/storageCompensation.worker';
 
 const app = express();
 app.disable('etag');
@@ -99,6 +100,7 @@ const healthHandler = async (req: Request, res: Response) => {
     await prisma.$queryRaw`SELECT 1`;
 
     storage = await checkStorageHealth();
+    const storageCompensation = await getStorageCompensationHealth();
     return res.json({
       api: 'ok',
       database: 'ok',
@@ -112,6 +114,7 @@ const healthHandler = async (req: Request, res: Response) => {
       storage_primary: storageInfo.primary,
       storage_provider: storageInfo.provider,
       replication_enabled: storageInfo.replication_enabled,
+      storage_compensation: storageCompensation,
       timestamp: new Date().toISOString(),
       correlation_id: correlationId,
     });
@@ -255,3 +258,7 @@ app.listen(PORT, () => {
   console.log(`   Health: http://localhost:${PORT}/api/health`);
   console.log(`   Supabase Storage: ${process.env.SUPABASE_URL ? '✅ configured' : '❌ NOT configured'}`);
 });
+
+if (String(process.env.STORAGE_COMPENSATION_WORKER_ENABLED || 'false').toLowerCase() === 'true') {
+  storageCompensationWorker.start();
+}

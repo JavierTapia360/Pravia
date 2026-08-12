@@ -10,7 +10,7 @@ const endOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), d
 function budget(exp: any) {
   const data = exp?.datos_operacion?.presupuesto;
   return {
-    total: asNumber(data?.total_cliente ?? exp?.cotizacion?.total_cliente ?? exp?.valor_operacion),
+    total: asNumber(data?.total_cliente ?? exp?.cotizacion?.total_cliente),
     pravia: asNumber(data?.honorarios_pravia ?? exp?.cotizacion?.honorarios_pravia),
   };
 }

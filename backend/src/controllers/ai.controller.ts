@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
 import { getOpenAIEscalationModelName, getOpenAIModelName } from '../services/openaiDocument.service';
+import { AssistantToolError, assistantToolCatalog, executeAssistantTool, type AssistantToolName } from '../services/assistantTools.service';
 
 const asNumber = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 
@@ -14,8 +15,26 @@ function periodStart(value: unknown) {
 }
 
 export class AIController {
+  static async tools(req: Request, res: Response) {
+    return res.json({ success: true, tools: assistantToolCatalog().filter((tool) => !tool.permission || req.user?.permissions.includes(tool.permission as any)) });
+  }
+
+  static async executeTool(req: Request, res: Response) {
+    try {
+      if (!req.user) return res.status(401).json({ success: false, code: 'AUTH_REQUIRED', error: 'Inicia sesión para continuar.' });
+      const result = await executeAssistantTool({ tool: req.params.tool as AssistantToolName, args: req.body?.args, context: req.body?.context, user: req.user, correlationId: req.correlationId || crypto.randomUUID() });
+      return res.json(result);
+    } catch (error: any) {
+      const status = error instanceof AssistantToolError ? error.status : 500;
+      return res.status(status).json({ success: false, code: error.code || 'AI_TOOL_FAILED', error: status === 500 ? 'No fue posible ejecutar la herramienta solicitada.' : error.message, correlation_id: req.correlationId });
+    }
+  }
+
   static async dashboard(req: Request, res: Response) {
     try {
+      if (!req.user || !['DIRECCION', 'ADMINISTRACION'].includes(req.user.rol)) {
+        return res.status(403).json({ success: false, code: 'AI_CONFIGURATION_ACCESS_DENIED', error: 'La configuración técnica de IA es exclusiva de roles administrativos.' });
+      }
       const from = periodStart(req.query.periodo);
       const where = {
         created_at: { gte: from },

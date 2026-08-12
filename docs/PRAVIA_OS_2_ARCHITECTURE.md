@@ -155,7 +155,7 @@ Pendiente: catálogo de handlers, retries/backoff, dead-letter operativo, notifi
 
 PRAVIA IA vive en el shell, no como módulo de trabajo común. Su drawer resuelve usuario, rol, ruta, módulo y entidad de URL; ofrece navegación contextual, tres modos y estados visuales con reducción de movimiento.
 
-La rama no incluye todavía herramientas backend de lectura de datos. Se rechazó esa ampliación de alcance hasta recibir autorización explícita. En consecuencia, la UI no inventa pendientes, saldos, fechas ni fuentes: limita sus respuestas a navegación y principios operativos.
+La rama incluye un registro backend de tools tipadas, con permisos por tool, object scope, límites, procedencia, correlación y auditoría. El shell reutiliza el ID del expediente visible para preguntas como “¿qué falta?”. Tarea, cita y seguimiento son borradores hasta Confirmar; las acciones sensibles permanecen fuera de alcance.
 
 Véase `docs/PRAVIA_AI.md`.
 
@@ -170,10 +170,8 @@ Véase `docs/PRAVIA_AI.md`.
 
 ## Deuda y bloqueos
 
-1. Aprobar la matriz RBAC final para transición/entrega.
-2. Definir y migrar ledger financiero histórico sin inferir conceptos.
-3. Implementar herramientas backend de PRAVIA IA con Permission Engine, procedencia y auditoría.
-4. Incorporar al branch los binarios de marca que hoy existen sin seguimiento en el workspace original.
-5. Completar compensación de storage y retención física.
-6. Añadir paginación server-side homogénea y búsqueda global real.
-7. Ejecutar E2E autenticado y revisión visual de todos los módulos con una cuenta de prueba segura.
+1. Aplicar la matriz RBAC final de Recepción/Gestoría; el cambio fue rechazado por la puerta de seguridad del entorno al detectar conflicto con el alcance frontend-only anterior.
+2. Revisar el informe del clasificador financiero y autorizar por separado cualquier backfill.
+3. Migrar proyectos/reportes `LOCAL_LEGACY` antes de retirar el consumer de filesystem.
+4. Reconfirmar si las tools deben estar disponibles para roles que hoy no poseen el permiso paraguas `ia.read`.
+5. Ejecutar E2E autenticado y regresión visual cuando existan `PRAVIA_E2E_EMAIL`/`PRAVIA_E2E_PASSWORD`.

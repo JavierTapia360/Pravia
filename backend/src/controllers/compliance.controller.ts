@@ -71,7 +71,7 @@ export class ComplianceController {
       const operationDate = req.body.fecha_operacion ? new Date(req.body.fecha_operacion) : new Date();
       if (Number.isNaN(operationDate.getTime())) throw new ComplianceError('La fecha de operación no es válida.', 'COMPLIANCE_DATE_INVALID');
       const [expediente, rule] = await Promise.all([
-        prisma.expediente.findFirst({ where: { id: String(req.body.expediente_id), archived_at: null }, select: { id: true } }),
+        prisma.expediente.findFirst({ where: { id: String(req.body.expediente_id), archived_at: null, ...expedienteAccessWhere(req.user!) }, select: { id: true } }),
         prisma.complianceRuleSet.findFirst({ where: { id: String(req.body.rule_set_id), tipo: type, estatus: { not: 'RETIRADA' }, vigencia_desde: { lte: operationDate }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: operationDate } }] } }),
       ]);
       if (!expediente) throw new ComplianceError('El expediente no está activo.', 'COMPLIANCE_EXPEDIENTE_INVALID', 404);

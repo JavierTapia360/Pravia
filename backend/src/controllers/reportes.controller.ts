@@ -25,7 +25,7 @@ function reportingPeriod(query: Request['query']) {
 
 function budgetFor(exp: any) {
   const budget = exp?.datos_operacion?.presupuesto;
-  const totalCliente = numberValue(budget?.total_cliente ?? exp?.cotizacion?.total_cliente ?? exp?.valor_operacion);
+  const totalCliente = numberValue(budget?.total_cliente ?? exp?.cotizacion?.total_cliente);
   const pravia = numberValue(budget?.honorarios_pravia ?? exp?.cotizacion?.honorarios_pravia);
   return { totalCliente, pravia };
 }

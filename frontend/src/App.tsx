@@ -46,6 +46,11 @@ const PermissionRoute = ({ permission, children }: { permission: string; childre
   return allowed ? children : <Navigate to="/mi-dia" replace />;
 };
 
+const AdministrativeRoute = ({ children }: { children: JSX.Element }) => {
+  const role = useAuthStore((state) => state.user?.rol);
+  return role && ['DIRECCION', 'ADMINISTRACION'].includes(role) ? children : <Navigate to="/mi-dia" replace />;
+};
+
 import { ToastContainer } from './components/ui/ToastContainer';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { PwaStatus } from './components/pwa/PwaStatus';
@@ -85,7 +90,7 @@ function App() {
             <Route path="finanzas" element={<PermissionRoute permission="finanzas.read"><Finanzas /></PermissionRoute>} />
             <Route path="agenda" element={<PermissionRoute permission="agenda.read"><Agenda /></PermissionRoute>} />
             <Route path="reportes" element={<PermissionRoute permission="reportes.read"><Reportes /></PermissionRoute>} />
-            <Route path="inteligencia" element={<PermissionRoute permission="ia.read"><Inteligencia /></PermissionRoute>} />
+            <Route path="inteligencia" element={<AdministrativeRoute><Inteligencia /></AdministrativeRoute>} />
             <Route path="riesgos" element={<PermissionRoute permission="cumplimiento.read"><Riesgos /></PermissionRoute>} />
             <Route path="configuracion/usuarios" element={<PermissionRoute permission="usuarios.manage"><Usuarios /></PermissionRoute>} />
           </Route>

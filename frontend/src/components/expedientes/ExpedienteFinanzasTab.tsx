@@ -117,7 +117,7 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
   // Cálculos dinámicos
   const presupuestoOperativo = expData?.datos_operacion?.presupuesto;
   const totalPresupuestado = Number(
-    presupuestoOperativo?.total_cliente ?? expData?.cotizacion?.total_cliente ?? expData?.valor_operacion ?? 0
+    presupuestoOperativo?.total_cliente ?? expData?.cotizacion?.total_cliente ?? 0
   );
 
   const activeLedger = movimientos.filter(

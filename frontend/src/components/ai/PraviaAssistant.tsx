@@ -1,10 +1,14 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, ChevronDown, ExternalLink, Send, Settings2, Sparkles, X } from 'lucide-react';
+import { ArrowRight, Check, ChevronDown, ExternalLink, Pencil, Send, Settings2, Sparkles, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
+import { api } from '../../services/api';
+import { aiService, type AssistantToolName, type AssistantToolResult } from '../../services/ai.service';
+import { buildAssistantContext, type GlobalAssistantContext } from './assistantContext';
+import { dismissSuggestion, isSuggestionVisible, markSuggestionShown, snoozeSuggestion, suggestionFromPendingItems, type PraviaSuggestion } from './suggestionEngine';
 
 type InteractionMode = 'proactive' | 'balanced' | 'discreet';
-type OwlState = 'idle' | 'greeting' | 'thinking' | 'processing' | 'success';
+type OwlState = 'idle' | 'blink' | 'greeting' | 'thinking' | 'processing' | 'success';
 
 interface AssistantAction {
   label: string;
@@ -101,6 +105,47 @@ function fallbackImage(event: React.SyntheticEvent<HTMLImageElement>) {
   if (!event.currentTarget.src.endsWith('/icons/pravia-mark.svg')) event.currentTarget.src = '/icons/pravia-mark.svg';
 }
 
+const tomorrowAtTen = () => {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  date.setHours(10, 0, 0, 0);
+  return date.toISOString();
+};
+
+function inferTool(rawQuery: string, context: GlobalAssistantContext): { tool: AssistantToolName; args: Record<string, unknown> } {
+  const query = rawQuery.toLocaleLowerCase('es-MX');
+  const expediente_id = context.entity_type === 'expediente' ? context.entity_id : undefined;
+  if (/\b(crea|crear|prepara|programa)\b.*\b(cita|reuni[oó]n)\b/.test(query)) return { tool: 'prepareAppointment', args: { title: rawQuery.replace(/\b(crea|crear|prepara|programa|una|cita|reunión|para mañana)\b/gi, ' ').replace(/\s+/g, ' ').trim() || 'Cita de seguimiento', fecha_inicio: tomorrowAtTen(), expediente_id } };
+  if (/\b(crea|crear|prepara|agrega)\b.*\btarea\b/.test(query)) return { tool: 'prepareTask', args: { title: rawQuery.replace(/\b(crea|crear|prepara|agrega|una|tarea|para mañana)\b/gi, ' ').replace(/\s+/g, ' ').trim() || 'Seguimiento pendiente', fecha_limite: tomorrowAtTen(), expediente_id } };
+  if (/\b(prepara|crear|crea)\b.*\bseguimiento\b/.test(query)) return { tool: 'prepareFollowUp', args: { title: rawQuery.replace(/\b(prepara|crear|crea|un|seguimiento|para mañana)\b/gi, ' ').replace(/\s+/g, ' ').trim() || 'Dar seguimiento', fecha_limite: tomorrowAtTen(), expediente_id } };
+  if (expediente_id && /(qu[eé] falta|pendiente|incompleto|vencido)/.test(query)) return { tool: 'getExpedientePendingItems', args: {} };
+  if (expediente_id && /(documento|archivo|evidencia)/.test(query)) return { tool: 'getExpedienteDocuments', args: {} };
+  if (expediente_id && /(saldo|cobro|finanza|pago)/.test(query)) return { tool: 'getFinancialSummary', args: {} };
+  if (expediente_id && /(cumplimiento|riesgo|uif|isr)/.test(query)) return { tool: 'getComplianceSummary', args: {} };
+  if (expediente_id && /(agenda|evento|cita|firma pr[oó]xima)/.test(query)) return { tool: 'getUpcomingEvents', args: {} };
+  if (expediente_id) return { tool: 'getExpedienteSummary', args: {} };
+  if (/(mi trabajo|mis tareas|qu[eé] tengo|pendientes de hoy)/.test(query)) return { tool: 'getCurrentUserWork', args: {} };
+  if (/(saldos? pendientes?|cobranza)/.test(query)) return { tool: 'getOutstandingBalances', args: {} };
+  return { tool: 'globalSearch', args: { query: rawQuery.replace(/^buscar\s+/i, '').trim() } };
+}
+
+function toolResponse(result: AssistantToolResult): string {
+  const data: any = result.data;
+  if (result.tool === 'getExpedientePendingItems') return data.total_pendientes
+    ? `Encontré ${data.total_pendientes} pendiente${data.total_pendientes === 1 ? '' : 's'}: ${data.requisitos_documentales?.length || 0} documental(es), ${data.tareas?.length || 0} tarea(s) y ${data.gestiones_externas?.length || 0} gestión(es) externa(s).`
+    : 'No encontré requisitos, tareas ni gestiones externas pendientes en el expediente actual.';
+  if (result.tool === 'getExpedienteSummary') return `${data.folio}: ${data.estado}${data.etapa ? ` · ${data.etapa}` : ''}. Avance general: ${Math.round(Number(data.avance?.general || 0))}%.`;
+  if (result.tool === 'getFinancialSummary') return `Presupuesto cliente: ${Number(data.presupuesto_cliente || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' })}. Recibido neto: ${Number(data.recibido_cliente_neto || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' })}. Saldo: ${Number(data.saldo_cliente || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' })}.`;
+  if (result.tool === 'getExpedienteDocuments') return `Encontré ${Array.isArray(data) ? data.length : 0} documento(s) vinculados dentro del límite de consulta.`;
+  if (result.tool === 'getUpcomingEvents' || result.tool === 'getAgenda') return `Encontré ${Array.isArray(data) ? data.length : 0} evento(s) en el rango consultado.`;
+  if (result.tool === 'getComplianceSummary') return `El expediente tiene ${data.revisiones?.length || 0} revisión(es) de cumplimiento registradas.`;
+  if (result.tool === 'getCurrentUserWork') return `Tienes ${data.tareas?.length || 0} tarea(s) abierta(s) y ${data.proximos_eventos?.length || 0} evento(s) próximos.`;
+  if (result.tool === 'getOutstandingBalances') return `Encontré ${Array.isArray(data) ? data.length : 0} expediente(s) con saldo pendiente dentro de tu alcance.`;
+  if (['prepareTask', 'prepareAppointment', 'prepareFollowUp'].includes(result.tool)) return 'Preparé el borrador. Revísalo: no se ejecutará hasta que elijas Confirmar.';
+  if (result.tool === 'globalSearch') return `Resultados: ${data.expedientes?.length || 0} expediente(s), ${data.comparecientes?.length || 0} compareciente(s) y ${data.notarias?.length || 0} notaría(s).`;
+  return 'Consulta completada con las fuentes autorizadas disponibles.';
+}
+
 export function PraviaAssistant() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -114,17 +159,46 @@ export function PraviaAssistant() {
   const [input, setInput] = useState('');
   const [response, setResponse] = useState('');
   const [showSuggestion, setShowSuggestion] = useState(false);
+  const [suggestion, setSuggestion] = useState<PraviaSuggestion | null>(null);
+  const [toolResult, setToolResult] = useState<AssistantToolResult | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const context = useMemo(() => contextFor(location.pathname), [location.pathname]);
+  const globalContext = useMemo(() => buildAssistantContext(location.pathname), [location.pathname]);
 
   useEffect(() => {
     setResponse('');
+    setToolResult(null);
     setOwlState('idle');
-    setShowSuggestion(mode === 'proactive' || (mode === 'balanced' && location.pathname !== '/mi-dia'));
-  }, [location.pathname, mode]);
+    setSuggestion(null);
+    setShowSuggestion(false);
+    if (mode === 'discreet' || globalContext.entity_type !== 'expediente' || !user?.permissions.includes('expedientes.read')) return;
+    let active = true;
+    aiService.executeTool('getExpedientePendingItems', {}, globalContext)
+      .then((result) => {
+        if (!active) return;
+        const next = suggestionFromPendingItems(result.data);
+        if (next && isSuggestionVisible(next, mode)) {
+          setSuggestion(next);
+          setShowSuggestion(true);
+          markSuggestionShown(next.id);
+        }
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [globalContext, mode, user?.permissions]);
 
   useEffect(() => {
     window.localStorage.setItem('pravia_ai_mode', mode);
   }, [mode]);
+
+  useEffect(() => {
+    if (!open || owlState !== 'idle') return;
+    const timer = window.setTimeout(() => {
+      setOwlState('blink');
+      window.setTimeout(() => setOwlState('idle'), 180);
+    }, 12_000 + Math.round(Math.random() * 8_000));
+    return () => window.clearTimeout(timer);
+  }, [open, owlState]);
 
   const openAssistant = () => {
     setOpen(true);
@@ -142,37 +216,65 @@ export function PraviaAssistant() {
     }, 500);
   };
 
+  const submitQuery = async (rawQuery: string) => {
+    const query = rawQuery.trim();
+    if (!query) return;
+    setToolResult(null);
+    setOwlState('thinking');
+    try {
+      const request = inferTool(query, globalContext);
+      setOwlState(request.tool.startsWith('prepare') ? 'processing' : 'thinking');
+      const result = await aiService.executeTool(request.tool, request.args, globalContext);
+      setToolResult(result);
+      setResponse(toolResponse(result));
+      setOwlState(request.tool.startsWith('prepare') ? 'processing' : 'success');
+      window.setTimeout(() => setOwlState('idle'), 900);
+    } catch (error: any) {
+      setResponse(error?.message || 'No fue posible completar la consulta con tus permisos actuales.');
+      setOwlState('idle');
+    }
+  };
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const query = input.trim().toLocaleLowerCase('es-MX');
+    const query = input.trim();
     if (!query) return;
-    setOwlState('thinking');
-    window.setTimeout(() => {
-      const destination = query.includes('agenda') ? '/agenda'
-        : query.includes('expediente') ? '/expedientes'
-          : query.includes('compareciente') ? '/comparecientes'
-            : query.includes('finanza') || query.includes('pago') ? '/finanzas'
-              : query.includes('riesgo') || query.includes('uif') ? '/riesgos'
-                : query.includes('notar') ? '/notarias'
-                  : '';
-      setResponse(destination
-        ? 'Puedo llevarte al módulo relacionado. Para responder con datos del sistema necesito una herramienta backend autorizada, limitada por tus permisos y con fuentes visibles.'
-        : 'Entendí la solicitud, pero no consultaré ni inventaré datos. La herramienta backend correspondiente debe autorizarse antes de responder con información operativa.');
+    setInput('');
+    void submitQuery(query);
+  };
+
+  const preparedAction = toolResult?.data?.kind === 'PREPARED_ACTION' ? toolResult.data : null;
+  const confirmPreparedAction = async () => {
+    if (!preparedAction || confirming) return;
+    setConfirming(true);
+    setOwlState('processing');
+    try {
+      await api.post(preparedAction.confirmation.endpoint, preparedAction.payload);
+      setResponse('Acción confirmada y registrada mediante la API normal de PRAVIA.');
+      setToolResult(null);
+      setOwlState('success');
+      window.setTimeout(() => setOwlState('idle'), 900);
+    } catch (error: any) {
+      setResponse(error?.message || 'No fue posible confirmar la acción.');
       setOwlState('idle');
-      setInput('');
-      if (destination) window.setTimeout(() => navigate(destination), 900);
-    }, 550);
+    } finally { setConfirming(false); }
   };
 
   return (
     <div className="pravia-assistant" data-open={open ? 'true' : 'false'}>
-      {showSuggestion && !open && mode !== 'discreet' && (
-        <button type="button" className="pravia-ai-suggestion" onClick={openAssistant}>
-          <span className="pravia-ai-suggestion__eyebrow">Sugerencia contextual</span>
-          <strong>{context.title}</strong>
-          <span>{context.message}</span>
-          <ArrowRight size={16} aria-hidden="true" />
-        </button>
+      {showSuggestion && suggestion && !open && mode !== 'discreet' && (
+        <section className="pravia-ai-suggestion" aria-label="Sugerencia contextual de PRAVIA IA">
+          <button type="button" className="pravia-ai-suggestion__main" onClick={() => { openAssistant(); void submitQuery(suggestion.action.query); }}>
+            <span className="pravia-ai-suggestion__eyebrow">{suggestion.trigger.replace(/_/g, ' ')}</span>
+            <strong>{suggestion.title}</strong>
+            <span>{suggestion.reason}</span>
+            <ArrowRight size={16} aria-hidden="true" />
+          </button>
+          <div className="pravia-ai-suggestion__controls">
+            <button type="button" onClick={() => { snoozeSuggestion(suggestion.id); setShowSuggestion(false); }}>Después</button>
+            <button type="button" onClick={() => { dismissSuggestion(suggestion.id); setShowSuggestion(false); }}>Descartar</button>
+          </div>
+        </section>
       )}
 
       <button
@@ -225,21 +327,42 @@ export function PraviaAssistant() {
             <section className="pravia-ai-message pravia-ai-message--result" aria-live="polite">
               <p className="pravia-ai-message__label">Respuesta segura</p>
               <p>{response}</p>
-              <span className="pravia-ai-source">Fuente: contexto de navegación de PRAVIA OS</span>
+              {preparedAction && (
+                <div className="pravia-ai-prepared">
+                  <dl>
+                    <div><dt>Título</dt><dd>{preparedAction.payload.titulo}</dd></div>
+                    <div><dt>Fecha</dt><dd>{new Date(preparedAction.payload.fecha_limite || preparedAction.payload.fecha_inicio).toLocaleString('es-MX')}</dd></div>
+                    <div><dt>Responsable</dt><dd>{preparedAction.responsible.nombre} {preparedAction.responsible.apellido}</dd></div>
+                  </dl>
+                  <div>
+                    <button type="button" onClick={() => void confirmPreparedAction()} disabled={confirming}><Check size={15} />{confirming ? 'Confirmando…' : 'Confirmar'}</button>
+                    <button type="button" onClick={() => { setInput(String(preparedAction.payload.titulo || '')); setToolResult(null); }}><Pencil size={15} />Editar</button>
+                    <button type="button" onClick={() => { setToolResult(null); setResponse('Borrador cancelado. No se realizó ningún cambio.'); }}><X size={15} />Cancelar</button>
+                  </div>
+                </div>
+              )}
+              {toolResult?.provenance?.length ? (
+                <div className="pravia-ai-sources">
+                  <span>Fuentes consultadas</span>
+                  {toolResult.provenance.slice(0, 5).map((item) => <button type="button" key={`${item.entity}-${item.id}`} onClick={() => navigate(item.path)}>{item.label}<ExternalLink size={12} /></button>)}
+                  {toolResult.truncated && <small>Resultados limitados para proteger contexto y rendimiento.</small>}
+                  <small>Correlación: {toolResult.correlation_id}</small>
+                </div>
+              ) : <span className="pravia-ai-source">Fuente: contexto autenticado de PRAVIA OS</span>}
             </section>
           )}
 
           <section className="pravia-ai-safety-note">
             <strong>Control humano activo</strong>
-            <p>No se realizan escrituras, confirmaciones jurídicas ni consultas de datos sensibles desde este panel sin herramientas autorizadas.</p>
+            <p>Cada consulta hereda tus permisos. Las acciones preparadas solo se ejecutan después de tu confirmación y mediante la API normal.</p>
           </section>
         </div>
 
         <footer className="pravia-ai-footer">
           <form onSubmit={submit} className="pravia-ai-composer">
-            <label htmlFor="pravia-ai-input">Pide orientación o navega a un módulo</label>
+            <label htmlFor="pravia-ai-input">Consulta el contexto actual o prepara una acción</label>
             <div>
-              <input id="pravia-ai-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ej. abrir agenda o ver expedientes" />
+              <input id="pravia-ai-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder={globalContext.entity_type === 'expediente' ? 'Ej. ¿qué falta?' : 'Ej. buscar EXP-2026'} />
               <button type="submit" disabled={!input.trim()} aria-label="Enviar"><Send size={17} /></button>
             </div>
           </form>
@@ -251,9 +374,7 @@ export function PraviaAssistant() {
             </select>
             <ChevronDown size={14} aria-hidden="true" />
           </label>
-          <a href="/inteligencia" onClick={(event) => { event.preventDefault(); navigate('/inteligencia'); }}>
-            Configuración y consumo de IA <ExternalLink size={13} />
-          </a>
+          {['DIRECCION', 'ADMINISTRACION'].includes(user?.rol || '') && <a href="/inteligencia" onClick={(event) => { event.preventDefault(); navigate('/inteligencia'); }}>Configuración y consumo de IA <ExternalLink size={13} /></a>}
         </footer>
       </aside>
       {open && <button type="button" className="pravia-ai-backdrop" onClick={() => setOpen(false)} aria-label="Cerrar PRAVIA IA" />}
