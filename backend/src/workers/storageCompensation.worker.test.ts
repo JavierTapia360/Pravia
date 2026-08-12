@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { StorageCompensationWorker } from './storageCompensation.worker';
+import { getStorageCompensationHealth, StorageCompensationWorker } from './storageCompensation.worker';
 
 const job = { id: 'job-1', carga_temporal_id: 'carga-1', storage_key: 'temporales/comparecientes/session-1/file.pdf', tipo_operacion: 'ELIMINAR_TEMPORAL', estatus: 'PENDIENTE', intentos: 0, ultimo_error: null, proxima_ejecucion_at: new Date(0), correlation_id: 'corr-1', created_at: new Date(0), updated_at: new Date(0) } as any;
 const carga = { id: 'carga-1', alta_session_id: 'session-1', storage_key_temporal: job.storage_key, archived_at: new Date(), estado: 'DESCARTADO', altaSession: { estatus: 'CANCELADO' } };
@@ -48,5 +48,34 @@ describe('StorageCompensationWorker', () => {
     const remove = vi.fn();
     expect(await new StorageCompensationWorker(db, remove, { pollMs: 1000, maxAttempts: 3, staleMs: 60_000 }).runOnce()).toBe(false);
     expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('recupera un job PROCESANDO obsoleto mediante reclamación optimista', async () => {
+    const staleJob = { ...job, estatus: 'PROCESANDO', updated_at: new Date(0) };
+    const db = mockDb();
+    db.storageCompensationJob.findFirst.mockResolvedValue(staleJob);
+    db.storageCompensationJob.findUnique.mockResolvedValue(staleJob);
+    const remove = vi.fn().mockResolvedValue(undefined);
+    await new StorageCompensationWorker(db, remove, { pollMs: 1000, maxAttempts: 3, staleMs: 60_000 }).runOnce();
+    expect(db.storageCompensationJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ estatus: 'PROCESANDO', updated_at: staleJob.updated_at }) }));
+    expect(remove).toHaveBeenCalledOnce();
+  });
+
+  it('detiene el polling sin iniciar trabajo nuevo', async () => {
+    const db = mockDb();
+    db.storageCompensationJob.findFirst.mockResolvedValue(null);
+    const worker = new StorageCompensationWorker(db, vi.fn(), { pollMs: 1000, maxAttempts: 3, staleMs: 60_000 });
+    worker.start();
+    expect(await worker.stop()).toBe(true);
+    const calls = db.storageCompensationJob.findFirst.mock.calls.length;
+    await worker.tick();
+    expect(db.storageCompensationJob.findFirst).toHaveBeenCalledTimes(calls);
+  });
+
+  it('aísla un fallo de telemetría del worker en el health', async () => {
+    const db = mockDb();
+    db.storageCompensationJob.count = vi.fn().mockRejectedValue(new Error('telemetría no disponible'));
+    const health = await getStorageCompensationHealth(db);
+    expect(health).toMatchObject({ status: 'unavailable', pending: null, processing: null, failed_jobs: null });
   });
 });

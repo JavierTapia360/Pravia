@@ -76,6 +76,20 @@ No colocar esas variables en Compose ni en historial de shell compartido. Tras l
 9. Performance Advisor no reporta llaves foráneas operativas sin índice.
 10. Se conserva una captura del conteo de usuarios, expedientes y documentos antes/después.
 
+## Worker de compensación de Storage
+
+El worker permanece apagado por defecto. Antes de activarlo se debe:
+
+1. aplicar la migración que crea `storage_compensation_jobs`;
+2. comprobar que `/api/health` muestra `storage_compensation.status=disabled` y conteos legibles;
+3. verificar acceso de lectura/escritura al bucket privado;
+4. revisar que los jobs pendientes correspondan exclusivamente a claves `temporales/comparecientes/<session-id>/`;
+5. activar `STORAGE_COMPENSATION_WORKER_ENABLED=true` en una sola instancia inicialmente.
+
+Parámetros: `STORAGE_COMPENSATION_POLL_MS` (15 s), `STORAGE_COMPENSATION_MAX_ATTEMPTS` (5) y `STORAGE_COMPENSATION_STALE_MS` (5 min). El worker reclama con versión/fecha optimista, recupera jobs `PROCESANDO` obsoletos, usa backoff exponencial y deja un fallo terminal cuando alcanza el máximo. Una referencia ambigua, activa, compartida o presente en `documentos` se rechaza sin borrar el objeto.
+
+Durante `SIGTERM` o `SIGINT` el servidor deja de aceptar solicitudes, detiene el polling, espera hasta 10 segundos el trabajo activo y cierra PostgreSQL. El health reporta `ok`, `degraded`, `disabled` o `unavailable`; este último no convierte un fallo exclusivo de telemetría del worker en un falso fallo de base de datos.
+
 ## HTTPS y proxy
 
 El Nginx incluido añade cabeceras de seguridad, evita cachear `sw.js`/manifest, conserva assets versionados y limita la carga a 30 MB. El terminador TLS puede estar delante del contenedor, pero debe enviar `X-Forwarded-Proto=https`. No publicar directamente el puerto del backend.

@@ -253,7 +253,7 @@ app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
   });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`✅ PRAVIA OS Backend running on port ${PORT}`);
   console.log(`   Health: http://localhost:${PORT}/api/health`);
   console.log(`   Supabase Storage: ${process.env.SUPABASE_URL ? '✅ configured' : '❌ NOT configured'}`);
@@ -262,3 +262,24 @@ app.listen(PORT, () => {
 if (String(process.env.STORAGE_COMPENSATION_WORKER_ENABLED || 'false').toLowerCase() === 'true') {
   storageCompensationWorker.start();
 }
+
+let shuttingDown = false;
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(JSON.stringify({ type: 'lifecycle', event: 'shutdown_started', signal }));
+  const forced = setTimeout(() => {
+    console.error(JSON.stringify({ type: 'lifecycle', event: 'shutdown_timeout', signal }));
+    process.exitCode = 1;
+    server.closeAllConnections?.();
+  }, 15_000);
+  forced.unref();
+  const workerDrained = await storageCompensationWorker.stop(10_000);
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await prisma.$disconnect().catch(() => undefined);
+  clearTimeout(forced);
+  console.log(JSON.stringify({ type: 'lifecycle', event: 'shutdown_completed', signal, worker_drained: workerDrained }));
+}
+
+process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
+process.once('SIGINT', () => { void shutdown('SIGINT'); });

@@ -15,6 +15,7 @@ const metrics = {
   retried: 0,
   failed: 0,
   unsafe_rejected: 0,
+  stale_reclaimed: 0,
   last_run_at: null as string | null,
   last_success_at: null as string | null,
   last_error: null as string | null,
@@ -25,6 +26,8 @@ const log = (event: string, data: Record<string, unknown>) => console.log(JSON.s
 export class StorageCompensationWorker {
   private timer: NodeJS.Timeout | null = null;
   private processing = false;
+  private stopping = false;
+  private activeTick: Promise<boolean> | null = null;
 
   constructor(
     private readonly db: WorkerDatabase = prisma,
@@ -38,21 +41,41 @@ export class StorageCompensationWorker {
 
   start() {
     if (this.timer) return;
+    this.stopping = false;
     metrics.running = true;
     log('worker_started', { poll_ms: this.options.pollMs, max_attempts: this.options.maxAttempts });
-    void this.tick();
-    this.timer = setInterval(() => void this.tick(), this.options.pollMs);
+    this.scheduleTick();
+    this.timer = setInterval(() => this.scheduleTick(), this.options.pollMs);
     this.timer.unref();
   }
 
-  stop() {
+  async stop(timeoutMs = 10_000) {
+    this.stopping = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     metrics.running = false;
+    if (!this.activeTick) return true;
+    const drained = await Promise.race([
+      this.activeTick.then(() => true, () => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), Math.max(100, timeoutMs))),
+    ]);
+    log('worker_stopped', { drained });
+    return drained;
+  }
+
+  private scheduleTick() {
+    if (this.stopping || this.activeTick) return;
+    this.activeTick = this.tick()
+      .catch((error: any) => {
+        metrics.last_error = String(error?.message || 'Storage compensation tick failed').slice(0, 500);
+        log('worker_tick_failed', { error_code: error?.code || 'STORAGE_WORKER_TICK_FAILED' });
+        return false;
+      })
+      .finally(() => { this.activeTick = null; });
   }
 
   async tick() {
-    if (this.processing) return false;
+    if (this.processing || this.stopping) return false;
     this.processing = true;
     metrics.last_run_at = new Date().toISOString();
     try { return await this.runOnce(); }
@@ -90,6 +113,7 @@ export class StorageCompensationWorker {
       data: { estatus: 'PROCESANDO' },
     });
     if (claimed.count !== 1) return null;
+    if (candidate.estatus === 'PROCESANDO') metrics.stale_reclaimed += 1;
     return this.db.storageCompensationJob.findUnique({ where: { id: candidate.id } });
   }
 
@@ -134,12 +158,16 @@ export class StorageCompensationWorker {
 }
 
 export async function getStorageCompensationHealth(db: WorkerDatabase = prisma) {
-  const [pending, processing, failed] = await Promise.all([
-    db.storageCompensationJob.count({ where: { estatus: 'PENDIENTE' } }),
-    db.storageCompensationJob.count({ where: { estatus: 'PROCESANDO' } }),
-    db.storageCompensationJob.count({ where: { estatus: 'FALLIDO' } }),
-  ]);
-  return { ...metrics, pending, processing, failed_jobs: failed, status: failed > 0 ? 'degraded' : metrics.running ? 'ok' : 'disabled' };
+  try {
+    const [pending, processing, failed] = await Promise.all([
+      db.storageCompensationJob.count({ where: { estatus: 'PENDIENTE' } }),
+      db.storageCompensationJob.count({ where: { estatus: 'PROCESANDO' } }),
+      db.storageCompensationJob.count({ where: { estatus: 'FALLIDO' } }),
+    ]);
+    return { ...metrics, pending, processing, failed_jobs: failed, status: failed > 0 ? 'degraded' : metrics.running ? 'ok' : 'disabled' };
+  } catch (error: any) {
+    return { ...metrics, pending: null, processing: null, failed_jobs: null, status: 'unavailable', last_error: String(error?.message || 'Health unavailable').slice(0, 500) };
+  }
 }
 
 export const storageCompensationWorker = new StorageCompensationWorker();
