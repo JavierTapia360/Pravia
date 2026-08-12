@@ -64,40 +64,32 @@ export function DataTable<T>({
   };
 
   return (
-    <div className="glass-card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+    <div className="data-surface">
       
       {/* Toolbar */}
-      <div style={{ padding: 'var(--space-4)', borderBottom: '1px solid var(--border-color)', display: 'flex', gap: 'var(--space-4)' }}>
-        <div style={{ position: 'relative', maxWidth: '300px', width: '100%' }}>
-          <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+      <div className="data-table-toolbar">
+        <div className="data-table-search">
+          <Search size={18} aria-hidden="true" />
           <input 
             type="text" 
             className="input-field" 
             placeholder={searchPlaceholder}
             value={searchQuery}
             onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-            style={{ paddingLeft: '40px', background: 'var(--bg-tertiary)' }}
           />
         </div>
       </div>
 
       {/* Table */}
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+      <div className="data-table-scroll">
+        <table className="data-table">
           <thead>
-            <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-tertiary)' }}>
+            <tr>
               {columns.map((col, i) => (
                 <th 
                   key={i} 
                   scope="col"
                   aria-sort={sortKey === col.accessorKey ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}
-                  style={{ 
-                    padding: 'var(--space-3) var(--space-4)', 
-                    fontWeight: 500, 
-                    color: 'var(--text-secondary)',
-                    fontSize: '0.85rem',
-                    whiteSpace: 'nowrap'
-                  }}
                 >
                   {col.sortable && col.accessorKey ? (
                     <button type="button" className="table-sort-button" onClick={() => handleSort(col.accessorKey)} aria-label={`Ordenar por ${col.header}`}>
@@ -111,7 +103,7 @@ export function DataTable<T>({
           <tbody>
             {paginatedData.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--text-muted)' }}>
+                <td colSpan={columns.length} className="data-table-empty">
                   No se encontraron resultados.
                 </td>
               </tr>
@@ -119,11 +111,7 @@ export function DataTable<T>({
               paginatedData.map((row, rowIndex) => (
                 <tr 
                   key={rowIndex} 
-                  style={{ 
-                    borderBottom: '1px solid var(--border-color)',
-                    cursor: onRowClick ? 'pointer' : 'default'
-                  }}
-                  className={onRowClick ? 'hover-bg-tertiary' : ''}
+                  className={onRowClick ? 'data-table-row--interactive' : ''}
                   onClick={() => onRowClick && onRowClick(row)}
                   onKeyDown={(event) => {
                     if (onRowClick && (event.key === 'Enter' || event.key === ' ')) {
@@ -135,7 +123,7 @@ export function DataTable<T>({
                   aria-label={onRowClick ? 'Abrir registro' : undefined}
                 >
                   {columns.map((col, colIndex) => (
-                    <td key={colIndex} style={{ padding: 'var(--space-3) var(--space-4)', fontSize: '0.9rem' }}>
+                    <td key={colIndex}>
                       {col.cell ? col.cell(row) : col.accessorKey ? String(row[col.accessorKey] || '') : ''}
                     </td>
                   ))}
@@ -147,18 +135,11 @@ export function DataTable<T>({
       </div>
 
       {/* Pagination */}
-      <div style={{ 
-        padding: 'var(--space-3) var(--space-4)', 
-        borderTop: '1px solid var(--border-color)',
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center',
-        background: 'var(--bg-tertiary)'
-      }}>
-        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+      <div className="data-table-pagination">
+        <div>
           Mostrando {paginatedData.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0} a {Math.min(currentPage * rowsPerPage, sortedData.length)} de {sortedData.length} resultados
         </div>
-        <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+        <div className="data-table-pagination__controls">
           <button 
             type="button"
             className="btn-icon" 
@@ -168,7 +149,7 @@ export function DataTable<T>({
           >
             <ChevronLeft size={18} />
           </button>
-          <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>
+          <span>
             {currentPage} / {totalPages}
           </span>
           <button 

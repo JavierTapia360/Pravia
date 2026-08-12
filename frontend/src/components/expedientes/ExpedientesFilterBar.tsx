@@ -21,9 +21,9 @@ export const ExpedientesFilterBar: React.FC<Props> = ({ onOpenCreate, onOpenConv
   const { filters, setFilters } = useExpedienteStore();
 
   return (
-    <div className="space-y-3 mb-6">
+    <div className="space-y-3">
       {/* Upper Control Bar: Search & Action Buttons */}
-      <div className="bg-dark-card/90 border border-white/10 rounded-2xl p-3 flex flex-col md:flex-row items-center justify-between gap-3 shadow-lg">
+      <div className="toolbar-card justify-between">
         
         {/* Search Input Container */}
         <div className="relative flex-1 w-full">
@@ -33,12 +33,12 @@ export const ExpedientesFilterBar: React.FC<Props> = ({ onOpenCreate, onOpenConv
             placeholder="Buscar por Folio PRAVIA, cliente, antecedente o notaría..."
             value={filters.search}
             onChange={(e) => setFilters({ search: e.target.value })}
-            className="w-full bg-slate-900/80 border border-white/10 rounded-xl pl-10 pr-9 py-2.5 text-sm text-slate-100 placeholder-slate-400 focus:outline-none focus:border-gold focus:ring-1 focus:ring-gold/30 transition-all"
+            className="control-height w-full rounded-xl border border-slate-300 bg-white pl-10 pr-9 text-sm text-slate-900 placeholder-slate-500 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-800/15"
           />
           {filters.search && (
             <button
               onClick={() => setFilters({ search: '' })}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-900"
             >
               <X size={14} />
             </button>
@@ -49,7 +49,7 @@ export const ExpedientesFilterBar: React.FC<Props> = ({ onOpenCreate, onOpenConv
         <div className="flex items-center gap-2.5 w-full md:w-auto justify-end">
           <button
             onClick={onOpenConvert}
-            className="h-10 px-4 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-white/10 text-slate-200 text-xs font-semibold flex items-center gap-2 transition-all hover:border-gold/30"
+            className="btn btn-secondary btn-md"
           >
             <ArrowRightLeft size={15} className="text-gold" />
             <span>Convertir Cotización</span>
@@ -57,7 +57,7 @@ export const ExpedientesFilterBar: React.FC<Props> = ({ onOpenCreate, onOpenConv
 
           <button
             onClick={onOpenCreate}
-            className="h-10 px-4 rounded-xl bg-gold hover:bg-gold-light text-slate-950 text-xs font-bold flex items-center gap-2 transition-all shadow-md hover:shadow-gold/20"
+            className="btn btn-primary btn-md"
           >
             <Plus size={16} />
             <span>Nuevo Expediente</span>
@@ -67,7 +67,7 @@ export const ExpedientesFilterBar: React.FC<Props> = ({ onOpenCreate, onOpenConv
 
       {/* Quick Estatus Filter Pills */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 px-1">
-        <span className="text-[11px] font-bold text-muted uppercase tracking-wider mr-1 flex items-center gap-1">
+        <span className="mr-1 flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-slate-500">
           <Filter size={12} /> Estado:
         </span>
         {QUICK_FILTERS.map((f) => {
@@ -78,8 +78,8 @@ export const ExpedientesFilterBar: React.FC<Props> = ({ onOpenCreate, onOpenConv
               onClick={() => setFilters({ estatus: f.value })}
               className={`px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap border ${
                 isActive
-                  ? 'bg-gold text-slate-950 border-gold shadow-sm'
-                  : 'bg-slate-900/60 text-slate-400 border-white/10 hover:border-white/20 hover:text-slate-200'
+                  ? 'bg-amber-700 text-white border-amber-700 shadow-sm'
+                  : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400 hover:text-slate-950'
               }`}
             >
               {f.label}

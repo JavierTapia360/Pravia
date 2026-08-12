@@ -51,108 +51,108 @@ export const ExpedientesMetrics: React.FC<Props> = ({ expedientes }) => {
   }, 0);
 
   return (
-    <div className="space-y-3 mb-6">
+    <section className="space-y-4" aria-labelledby="expedientes-indicadores">
       {/* Metrics Period Filter Bar */}
-      <div className="flex items-center justify-between text-xs text-slate-400 px-1">
-        <span className="font-bold text-slate-300 flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <span id="expedientes-indicadores" className="module-eyebrow flex items-center gap-2">
           <Activity size={14} className="text-gold" /> Indicadores Financieros y Operativos PRAVIA
         </span>
 
-        <div className="flex items-center gap-2">
-          <Calendar size={13} className="text-slate-400" />
-          <span className="text-[11px]">Periodo de Honorarios:</span>
+        <label className="flex items-center gap-2 text-sm font-semibold text-slate-600">
+          <Calendar size={16} className="text-slate-500" />
+          <span>Periodo de honorarios</span>
           <select
             value={periodo}
             onChange={(e) => setPeriodo(e.target.value as any)}
-            className="bg-slate-900 border border-white/10 rounded-lg px-2.5 py-1 text-xs text-gold font-bold focus:outline-none focus:border-gold cursor-pointer"
+            className="control-height rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-800/15"
           >
             <option value="mes_actual">Mes Actual</option>
             <option value="mes_anterior">Mes Anterior</option>
             <option value="ano_actual">Año Actual ({currentYear})</option>
             <option value="todos">Todos los Periodos</option>
           </select>
-        </div>
+        </label>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="metric-grid">
         {/* Card 1: Honorarios Firmados del Mes */}
         <div className="kpi-card group cursor-pointer">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Honorarios Firmados</span>
+            <span className="metric-label">Honorarios Firmados</span>
             <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform">
               <DollarSign size={18} />
             </div>
           </div>
           <div className="mt-3">
-            <h3 className="text-2xl font-extrabold text-emerald-400 tracking-tight truncate">
+            <h3 className="metric-value text-emerald-700 truncate">
               ${honorariosFirmados.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
             </h3>
           </div>
-          <div className="mt-3 pt-2 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
-            <span>Expedientes firmados: <strong className="text-slate-200">{signedExpedientes.length}</strong></span>
-            <span className="text-emerald-400 font-semibold">PRAVIA Neto</span>
+          <div className="metric-meta flex items-center justify-between gap-3">
+            <span>Expedientes firmados: <strong className="text-slate-900">{signedExpedientes.length}</strong></span>
+            <span className="text-emerald-700 font-semibold">PRAVIA neto</span>
           </div>
         </div>
 
         {/* Card 2: Honorarios en Cartera */}
         <div className="kpi-card group cursor-pointer">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Honorarios en Cartera</span>
+            <span className="metric-label">Honorarios en Cartera</span>
             <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 group-hover:scale-110 transition-transform">
               <Briefcase size={18} />
             </div>
           </div>
           <div className="mt-3">
-            <h3 className="text-2xl font-extrabold text-amber-400 tracking-tight truncate">
+            <h3 className="metric-value text-amber-800 truncate">
               ${honorariosCartera.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
             </h3>
           </div>
-          <div className="mt-3 pt-2 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
-            <span>En proceso: <strong className="text-slate-200">{carteraExpedientes.length}</strong></span>
-            <span className="text-amber-400 font-semibold flex items-center gap-1"><TrendingUp size={12} /> Pipeline</span>
+          <div className="metric-meta flex items-center justify-between gap-3">
+            <span>En proceso: <strong className="text-slate-900">{carteraExpedientes.length}</strong></span>
+            <span className="text-amber-800 font-semibold flex items-center gap-1"><TrendingUp size={14} /> Pipeline</span>
           </div>
         </div>
 
         {/* Card 3: Activos en Gestión */}
         <div className="kpi-card group cursor-pointer">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Activos en Gestión</span>
+            <span className="metric-label">Activos en Gestión</span>
             <div className="w-10 h-10 rounded-xl bg-gold/10 border border-gold/20 flex items-center justify-center text-gold group-hover:scale-110 transition-transform">
               <Folder size={18} />
             </div>
           </div>
           <div className="mt-3 flex items-baseline justify-between">
-            <h3 className="text-3xl font-extrabold text-white tracking-tight">{abiertos}</h3>
+            <h3 className="metric-value">{abiertos}</h3>
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gold/10 text-gold border border-gold/20">
               {total > 0 ? `${Math.round((abiertos / total) * 100)}%` : '0%'}
             </span>
           </div>
-          <div className="mt-3 pt-2 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
-            <span>Total expedientes: <strong className="text-slate-200">{total}</strong></span>
-            <span className="text-gold font-medium">Abiertos</span>
+          <div className="metric-meta flex items-center justify-between gap-3">
+            <span>Total expedientes: <strong className="text-slate-900">{total}</strong></span>
+            <span className="text-amber-800 font-semibold">Abiertos</span>
           </div>
         </div>
 
         {/* Card 4: Fase Notarial / Firma */}
         <div className="kpi-card group cursor-pointer">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Fase Notaria / Firma</span>
+            <span className="metric-label">Fase Notaría / Firma</span>
             <div className="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 group-hover:scale-110 transition-transform">
               <Clock size={18} />
             </div>
           </div>
           <div className="mt-3 flex items-baseline justify-between">
-            <h3 className="text-3xl font-extrabold text-white tracking-tight">{enFirma}</h3>
+            <h3 className="metric-value">{enFirma}</h3>
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20">
               Protocolo
             </span>
           </div>
-          <div className="mt-3 pt-2 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
-            <span>En firma: <strong className="text-slate-200">{expedientes.filter(e => e.estatus === 'FIRMA_PROGRAMADA').length}</strong></span>
-            <span className="text-sky-400 font-semibold">Prioridad</span>
+          <div className="metric-meta flex items-center justify-between gap-3">
+            <span>En firma: <strong className="text-slate-900">{expedientes.filter(e => e.estatus === 'FIRMA_PROGRAMADA').length}</strong></span>
+            <span className="text-sky-700 font-semibold">Prioridad</span>
           </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 };

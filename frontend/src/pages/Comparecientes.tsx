@@ -38,7 +38,7 @@ function ModalArchivarCompareciente({ compareciente, onClose, onConfirm, procesa
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-200">
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-100">
@@ -62,8 +62,8 @@ function ModalArchivarCompareciente({ compareciente, onClose, onConfirm, procesa
         <div className="p-5 space-y-4">
           {/* Nombre del compareciente */}
           <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Compareciente</p>
-            <p className="font-bold text-sm" style={{ color: '#090d16' }}>{nombreDisplay}</p>
+            <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-500">Compareciente</p>
+            <p className="text-sm font-bold text-slate-950">{nombreDisplay}</p>
             <p className="text-xs text-amber-700 mt-1.5 flex items-center gap-1.5">
               <AlertTriangle className="w-3.5 h-3.5" />
               El registro y sus relaciones se conservarán para trazabilidad.
@@ -174,7 +174,7 @@ export default function Comparecientes() {
   const totalMorales = data.filter((c) => c.tipo_persona === 'MORAL').length;
 
   return (
-    <div className="p-6 md:p-8 space-y-8 max-w-7xl mx-auto">
+    <div className="module-page comparecientes-page">
       
       {/* Feedback toast */}
       {feedbackMsg && (
@@ -192,17 +192,17 @@ export default function Comparecientes() {
       )}
 
       {/* 1. ENCABEZADO */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="module-page-header">
         <div>
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
               Catálogo Único Reutilizable
             </span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight mt-1">
+          <h1 className="module-title">
             Comparecientes
           </h1>
-          <p className="text-xs md:text-sm text-slate-500 mt-1">
+          <p className="module-description">
             Directorio maestro único de Personas Físicas y Morales reutilizable en Expedientes, Apoderados y Representaciones.
           </p>
         </div>
@@ -215,7 +215,7 @@ export default function Comparecientes() {
             sessionStorage.removeItem('comparecienteAltaSessionId');
             navigate(`/comparecientes/nuevo?mode=new&nonce=${crypto.randomUUID()}`);
           }}
-          className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs md:text-sm shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+          className="btn btn-primary btn-lg shrink-0"
         >
           <Plus className="w-4 h-4 stroke-[3]" />
           + Nuevo Compareciente
@@ -223,46 +223,46 @@ export default function Comparecientes() {
       </div>
 
       {/* 2. KPI INDICADORES */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center gap-3">
+      <div className="metric-grid">
+        <div className="surface-card flex items-center gap-4 p-5">
           <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
             <Users className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Comparecientes</p>
-            <p className="text-xl font-black text-slate-900">{total}</p>
+            <p className="metric-label">Total comparecientes</p>
+            <p className="mt-1 text-2xl font-bold text-slate-950">{total}</p>
           </div>
         </div>
-        <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center gap-3">
+        <div className="surface-card flex items-center gap-4 p-5">
           <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
             <UserCheck className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Personas Físicas</p>
-            <p className="text-xl font-black text-slate-900">{totalFisicas}</p>
+            <p className="metric-label">Personas físicas</p>
+            <p className="mt-1 text-2xl font-bold text-slate-950">{totalFisicas}</p>
           </div>
         </div>
-        <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center gap-3">
+        <div className="surface-card flex items-center gap-4 p-5">
           <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
             <Building2 className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Personas Morales</p>
-            <p className="text-xl font-black text-slate-900">{totalMorales}</p>
+            <p className="metric-label">Personas morales</p>
+            <p className="mt-1 text-2xl font-bold text-slate-950">{totalMorales}</p>
           </div>
         </div>
       </div>
 
       {/* 3. BÚSQUEDA Y FILTROS */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
-        <div className="relative w-full md:w-96">
+      <div className="toolbar-card justify-between">
+        <div className="relative w-full md:max-w-xl md:flex-1">
           <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
           <input
             type="text"
             placeholder="Buscar por Nombre, Razón Social, CURP, RFC..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full text-xs pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-amber-400 outline-none"
+            className="control-height w-full rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-4 text-sm text-slate-900 placeholder-slate-500 outline-none focus:border-blue-800 focus:ring-2 focus:ring-blue-800/15"
           />
         </div>
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
@@ -271,7 +271,7 @@ export default function Comparecientes() {
               key={tipo}
               type="button"
               onClick={() => setFilterTipo(tipo)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`control-height px-4 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer ${
                 filterTipo === tipo
                   ? tipo === 'TODOS'
                     ? 'bg-slate-900 text-white shadow-sm'
@@ -306,7 +306,7 @@ export default function Comparecientes() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="entity-grid">
           {data.map((c) => {
             const isFisica = c.tipo_persona === 'FISICA';
             const pf = c.personaFisica || c.persona_fisica;
@@ -324,7 +324,7 @@ export default function Comparecientes() {
             return (
               <div
                 key={c.id}
-                className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-amber-300 transition-all flex flex-col justify-between group"
+                className="entity-card flex flex-col justify-between group"
               >
                 {/* Cuerpo — clic navega al detalle */}
                 <div
@@ -333,35 +333,32 @@ export default function Comparecientes() {
                 >
                   {/* Fila Superior */}
                   <div className="flex items-center justify-between gap-2 mb-3">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold ${
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold ${
                       isFisica ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'
                     }`}>
                       {isFisica ? <UserCheck className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
                       {isFisica ? 'PERSONA FÍSICA' : 'PERSONA MORAL'}
                     </span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                    <span className="text-xs font-bold px-2 py-1 rounded bg-slate-100 text-slate-700">
                       {c.estatus || 'ACTIVO'}
                     </span>
                   </div>
 
                   {/* ── NOMBRE — CONTRASTE ALTO: sin depender de H3 ni variables de tema claro ── */}
-                  <div
-                    className="font-extrabold text-slate-950 text-base md:text-lg leading-snug group-hover:text-amber-800 transition-colors line-clamp-2 uppercase mt-1"
-                    style={{ color: '#090d16', opacity: 1 }}
-                  >
+                  <div className="mt-2 line-clamp-2 text-lg font-extrabold uppercase leading-snug text-slate-950 transition-colors group-hover:text-amber-800">
                     {nombreDisplay}
                   </div>
 
                   {/* RFC y CURP — contraste alto legible */}
                   <div className="mt-3 space-y-1 text-xs">
-                    <p className="font-mono font-bold" style={{ color: '#0f172a', opacity: 1 }}>
-                      <span className="font-sans font-bold text-slate-600 text-[11px] uppercase tracking-wider" style={{ color: '#475569' }}>RFC: </span>
-                      <span style={{ color: '#090d16' }}>{rfcDisplay}</span>
+                    <p className="font-mono font-bold text-slate-950">
+                      <span className="font-sans text-xs font-bold uppercase tracking-wider text-slate-600">RFC: </span>
+                      <span>{rfcDisplay}</span>
                     </p>
                     {curpDisplay && (
-                      <p className="font-mono font-bold" style={{ color: '#0f172a', opacity: 1 }}>
-                        <span className="font-sans font-bold text-slate-600 text-[11px] uppercase tracking-wider" style={{ color: '#475569' }}>CURP: </span>
-                        <span style={{ color: '#090d16' }}>{curpDisplay}</span>
+                      <p className="font-mono font-bold text-slate-950">
+                        <span className="font-sans text-xs font-bold uppercase tracking-wider text-slate-600">CURP: </span>
+                        <span>{curpDisplay}</span>
                       </p>
                     )}
                   </div>
@@ -379,7 +376,7 @@ export default function Comparecientes() {
                   
                   {/* Barra de Calidad */}
                   <div>
-                    <div className="flex items-center justify-between text-[11px] font-medium mb-1">
+                    <div className="mb-1.5 flex items-center justify-between text-[13px] font-medium">
                       <span className="text-slate-500">Calidad de Información</span>
                       <span className={`font-bold ${
                         calidad.porcentaje >= 85 ? 'text-emerald-700'
@@ -410,7 +407,7 @@ export default function Comparecientes() {
                         e.stopPropagation();
                         setModalArchivar(c);
                       }}
-                      className="flex items-center gap-1 text-[11px] font-semibold text-slate-400 hover:text-amber-600 transition-colors px-1.5 py-1 rounded-lg hover:bg-amber-50 cursor-pointer"
+                      className="flex min-h-9 items-center gap-1 px-2 py-1 text-[13px] font-semibold text-slate-500 transition-colors hover:rounded-lg hover:bg-amber-50 hover:text-amber-700"
                       title="Archivar de forma reversible"
                     >
                       <Archive className="w-3.5 h-3.5" />
