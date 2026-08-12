@@ -1,8 +1,11 @@
 import prisma from '../src/config/prisma';
 import { classifyLegacyPayment } from '../src/domain/legacyFinanceMigration';
+import fs from 'fs';
+import path from 'path';
 
 async function main() {
   const limitArg = process.argv.find((item) => item.startsWith('--limit='));
+  const outputArg = process.argv.find((item) => item.startsWith('--output-dir='));
   const limit = Math.min(Math.max(Number(limitArg?.split('=')[1] || 10_000), 1), 50_000);
   const payments = await prisma.pago.findMany({ orderBy: { fecha_registro: 'asc' }, take: limit });
   const movements = await prisma.movimientoFinanciero.findMany({ orderBy: { fecha_movimiento: 'asc' }, take: 100_000 });
@@ -29,7 +32,18 @@ async function main() {
     acc[row.clasificacion].importe += row.importe;
     return acc;
   }, {});
-  process.stdout.write(`${JSON.stringify({ mode: 'DRY_RUN_READ_ONLY', generated_at: new Date().toISOString(), summary, rows }, null, 2)}\n`);
+  const report = { mode: 'DRY_RUN_READ_ONLY', generated_at: new Date().toISOString(), summary, rows };
+  if (outputArg) {
+    const outputDir = path.resolve(outputArg.split('=').slice(1).join('='));
+    fs.mkdirSync(outputDir, { recursive: true });
+    fs.writeFileSync(path.join(outputDir, 'legacy-finance.json'), `${JSON.stringify(report, null, 2)}\n`);
+    const mdRows = rows.map((row) => `| ${row.legacy_pago_id} | ${row.clasificacion} | ${row.importe.toFixed(2)} | ${String(row.razon).replace(/\|/g, '\\|')} |`).join('\n');
+    fs.writeFileSync(path.join(outputDir, 'legacy-finance.md'), `# Auditoría financiera legacy\n\nModo: **DRY_RUN_READ_ONLY**\n\n| Pago | Clasificación | Importe | Razón |\n| --- | --- | ---: | --- |\n${mdRows}\n`);
+    const csvCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const csvRows = rows.map((row) => [row.legacy_pago_id, row.clasificacion, row.importe, row.expediente_id, row.cotizacion_id, row.posibles_duplicados.join('|'), row.razon].map(csvCell).join(',')).join('\n');
+    fs.writeFileSync(path.join(outputDir, 'legacy-finance.csv'), `legacy_pago_id,clasificacion,importe,expediente_id,cotizacion_id,posibles_duplicados,razon\n${csvRows}\n`);
+  }
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 }
 
 main().catch((error) => {
