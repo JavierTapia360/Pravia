@@ -22,6 +22,8 @@
     "e2e:critical": "ts-node scripts/e2e-critical-flows.ts",
     "e2e:seed": "ts-node scripts/seed-e2e.ts",
     "finance:audit-legacy": "ts-node scripts/audit-legacy-finance.ts",
+    "projects:migrate-legacy": "ts-node scripts/migrate-legacy-projects.ts",
+    "projects:register-template": "ts-node scripts/register-project-template.ts",
     "test:watch": "vitest",
     "seed": "ts-node prisma/seed.ts",
     "db:migrate": "npx prisma migrate dev",

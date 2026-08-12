@@ -172,6 +172,6 @@ Véase `docs/PRAVIA_AI.md`.
 
 1. Aplicar la matriz RBAC final de Recepción/Gestoría; el cambio fue rechazado por la puerta de seguridad del entorno al detectar conflicto con el alcance frontend-only anterior.
 2. Revisar el informe del clasificador financiero y autorizar por separado cualquier backfill.
-3. Migrar proyectos/reportes `LOCAL_LEGACY` antes de retirar el consumer de filesystem.
+3. Ejecutar y aprobar `projects:migrate-legacy`; el clasificador preserva incidencias y bloquea la retirada final del lector mientras existan referencias no resueltas.
 4. Reconfirmar si las tools deben estar disponibles para roles que hoy no poseen el permiso paraguas `ia.read`.
 5. Ejecutar E2E autenticado y regresión visual cuando existan `PRAVIA_E2E_EMAIL`/`PRAVIA_E2E_PASSWORD`.

@@ -256,9 +256,10 @@ model Notaria {
   created_at  DateTime  @default(now())
   updated_at  DateTime  @updatedAt
 
-  contactos    NotariaContacto[]
-  cotizaciones Cotizacion[]
-  expedientes  Expediente[]
+  contactos             NotariaContacto[]
+  cotizaciones          Cotizacion[]
+  expedientes           Expediente[]
+  plantillaDocumentales PlantillaDocumentalVersion[]
 
   @@map("notarias")
 }
@@ -502,16 +503,25 @@ model FlujoVersion {
 model PlantillaDocumentalVersion {
   id              String   @id @default(uuid()) @db.Uuid
   tipo_acto_id    String   @db.Uuid
+  notaria_id      String?  @db.Uuid
   version         Int      @default(1)
+  nombre          String?
+  storage_key     String?
+  mime_type       String?
+  size_bytes      Int?
+  checksum_sha256 String?
+  activa          Boolean  @default(true)
   requisitos_json Json
   vigente_desde   DateTime @default(now())
   creado_por_id   String   @db.Uuid
 
   tipo_acto   TipoActo     @relation(fields: [tipo_acto_id], references: [id], onDelete: Restrict)
+  notaria     Notaria?     @relation(fields: [notaria_id], references: [id], onDelete: SetNull)
   creado_por  User         @relation("PlantillaDocumentalVersionCreador", fields: [creado_por_id], references: [id])
   expedientes Expediente[]
 
-  @@unique([tipo_acto_id, version])
+  @@unique([tipo_acto_id, notaria_id, version])
+  @@index([tipo_acto_id, notaria_id, activa])
   @@map("plantilla_documental_versiones")
 }
 

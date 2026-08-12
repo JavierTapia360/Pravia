@@ -49,7 +49,7 @@ const STAGES = [
   { id: 1, name: 'Preparando documentos del expediente...', targetPercent: 15 },
   { id: 2, name: 'Extrayendo información y matrices de datos...', targetPercent: 30 },
   { id: 3, name: 'Validando datos confirmados del proyecto...', targetPercent: 50 },
-  { id: 4, name: 'Aplicando plantilla notarial plantilla_compraventa_notaria4.docx...', targetPercent: 70 },
+  { id: 4, name: 'Aplicando la plantilla persistente asignada al expediente...', targetPercent: 70 },
   { id: 5, name: 'Generando archivo DOCX inmutable V(n+1)...', targetPercent: 85 },
   { id: 6, name: 'Guardando nueva versión e inmutabilidad...', targetPercent: 95 },
   { id: 7, name: 'Generación completada exitosamente', targetPercent: 100 }
@@ -682,7 +682,7 @@ export const ProyectoEscrituraIA: React.FC<Props> = ({ expedienteId }) => {
                   </h5>
 
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    El borrador del proyecto fue construido exitosamente aplicando la plantilla notarial de la Notaría 4 y reemplazando las variables confirmadas en la matriz de datos.
+                    El borrador fue construido con la plantilla versionada asignada al expediente y los valores confirmados en la matriz de datos. Requiere revisión profesional antes de marcarlo como final.
                   </p>
                 </div>
 
