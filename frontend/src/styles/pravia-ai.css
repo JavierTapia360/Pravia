@@ -46,7 +46,7 @@
 .pravia-ai-suggestion__main > span:not(.pravia-ai-suggestion__eyebrow) { color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; }
 .pravia-ai-suggestion__main > svg { position: absolute; right: 16px; bottom: 16px; color: var(--color-accent); }
 .pravia-ai-suggestion__controls { display: flex; justify-content: flex-end; gap: var(--space-2); padding: 8px var(--space-3); border-top: 1px solid #f1e6d2; background: #fffaf2; }
-.pravia-ai-suggestion__controls button { min-height: 30px; padding: 0 9px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); font-size: 0.75rem; font-weight: 800; cursor: pointer; }
+.pravia-ai-suggestion__controls button { min-height: 38px; padding: 0 11px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); font-size: 0.8125rem; font-weight: 800; cursor: pointer; }
 .pravia-ai-suggestion__controls button:hover { background: #f7ead5; color: var(--text-primary); }
 
 .pravia-ai-panel {
@@ -91,7 +91,7 @@
 .pravia-ai-source { display: block; margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid #dbeafe; color: #1e3a8a; font-size: 0.75rem; font-weight: 700; }
 .pravia-ai-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid #dbeafe; }
 .pravia-ai-sources > span { width: 100%; color: #1e3a8a; font-size: 0.6875rem; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; }
-.pravia-ai-sources button { min-height: 30px; display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid #bfdbfe; border-radius: 8px; background: white; color: #1d4ed8; font-size: 0.75rem; font-weight: 800; cursor: pointer; }
+.pravia-ai-sources button { min-height: 38px; display: inline-flex; align-items: center; gap: 5px; padding: 0 11px; border: 1px solid #bfdbfe; border-radius: 8px; background: white; color: #1d4ed8; font-size: 0.8125rem; font-weight: 800; cursor: pointer; }
 .pravia-ai-sources small { width: 100%; color: var(--text-muted); font-size: 0.6875rem; line-height: 1.4; }
 .pravia-ai-prepared { margin-top: var(--space-3); padding: var(--space-3); border: 1px solid #dbeafe; border-radius: var(--radius-md); background: white; }
 .pravia-ai-prepared dl { display: grid; gap: 7px; }
@@ -99,7 +99,7 @@
 .pravia-ai-prepared dt { color: var(--text-muted); font-size: 0.75rem; font-weight: 700; }
 .pravia-ai-prepared dd { color: var(--text-primary); font-size: 0.8125rem; font-weight: 800; overflow-wrap: anywhere; }
 .pravia-ai-prepared > div { display: flex; flex-wrap: wrap; gap: 7px; margin-top: var(--space-3); }
-.pravia-ai-prepared button { min-height: 34px; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid var(--border-color); border-radius: 9px; background: white; color: var(--text-primary); font-size: 0.75rem; font-weight: 850; cursor: pointer; }
+.pravia-ai-prepared button { min-height: 40px; display: inline-flex; align-items: center; gap: 5px; padding: 0 12px; border: 1px solid var(--border-color); border-radius: 9px; background: white; color: var(--text-primary); font-size: 0.8125rem; font-weight: 850; cursor: pointer; }
 .pravia-ai-prepared button:first-child { border-color: var(--color-accent); background: var(--color-accent); color: white; }
 .pravia-ai-prepared button:disabled { opacity: .55; cursor: wait; }
 .pravia-ai-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }

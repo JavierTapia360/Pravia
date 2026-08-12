@@ -1,7 +1,9 @@
 {
   "name": "PRAVIA IA Owl",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "basePath": "/brand/pravia-ai",
+  "runtimeMaxDimension": 384,
+  "masterReference": "owl-master-reference.jpg",
   "states": {
     "idle": {
       "file": "owl-idle.png",

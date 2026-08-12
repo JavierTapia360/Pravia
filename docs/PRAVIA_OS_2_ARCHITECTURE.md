@@ -79,12 +79,12 @@ La matriz actual conserva los permisos históricos para evitar ampliar acceso si
 
 - Dirección, Administración y Consulta tienen lectura global en los ámbitos definidos.
 - Abogado se limita a registros propios/asignados cuando corresponde.
-- Gestoría accede a expedientes asignados o con tareas activas.
-- Recepción mantiene alcance comercial, no acceso implícito a expedientes.
+- Recepción lee únicamente la cola de entrega y puede registrar entregas; no recibe escritura general de expedientes.
+- Gestoría opera postfirma y accede a sus expedientes/tareas asignados; no recibe escritura general de expedientes.
 - Documentos heredan acceso de su archivo maestro, autor y vínculos activos.
 - Sesiones de alta temporal pertenecen al usuario, salvo perfiles elevados.
 
-Pendiente: cerrar con el propietario del producto la matriz exacta de transición, firma, postfirma y entrega para Recepción/Gestoría. No se amplió por inferencia.
+La matriz de transición, firma, postfirma y entrega de Recepción/Gestoría está implementada con permisos separados y validación de alcance de objeto.
 
 ## Workflow
 
@@ -104,7 +104,7 @@ Pendiente: cerrar con el propietario del producto la matriz exacta de transició
 - “Eliminar” en los contextos corregidos significa desvincular e inactivar; el binario se conserva.
 - La interfaz explica esta semántica antes de confirmar.
 
-Pendiente: worker completo de compensación para fallas entre storage y DB, política de retención física y migración exhaustiva de relaciones directas legacy.
+Implementado: compensación durable para cargas temporales con ownership estricto, lock optimista, recuperación de jobs obsoletos, retry/backoff, fallo terminal, health y cierre ordenado. Permanece apagada por defecto. Sigue pendiente definir la política general de retención física y completar la migración de relaciones directas legacy.
 
 ## Finanzas
 
@@ -144,8 +144,8 @@ Pendiente: catálogo de handlers, retries/backoff, dead-letter operativo, notifi
 ### Módulos intervenidos
 
 - Expedientes: encabezado claro, métricas ligeras, filtros separados y tabla respirable.
-- Comparecientes: grid que aprovecha el ancho, identidad y calidad jerarquizadas.
-- Notarías: cards de contacto/métricas y grid adaptable.
+- Comparecientes: tabla paginada por defecto para volumen, vista de tarjetas opcional, identidad y calidad jerarquizadas.
+- Notarías: tabla operativa por defecto, cards opcionales y distribución adaptable de contacto/métricas.
 - Agenda: toolbar de 42 px, navegación visible, calendario y tareas con mayor legibilidad.
 - Finanzas: resumen, tabs, filtros y tablas con scroll horizontal controlado.
 - Configuración IA: jerarquía de configuración, métricas, flujo y procedencia.
@@ -170,8 +170,6 @@ Véase `docs/PRAVIA_AI.md`.
 
 ## Deuda y bloqueos
 
-1. Aplicar la matriz RBAC final de Recepción/Gestoría; el cambio fue rechazado por la puerta de seguridad del entorno al detectar conflicto con el alcance frontend-only anterior.
-2. Revisar el informe del clasificador financiero y autorizar por separado cualquier backfill.
-3. Ejecutar y aprobar `projects:migrate-legacy`; el clasificador preserva incidencias y bloquea la retirada final del lector mientras existan referencias no resueltas.
-4. Reconfirmar si las tools deben estar disponibles para roles que hoy no poseen el permiso paraguas `ia.read`.
-5. Ejecutar E2E autenticado y regresión visual cuando existan `PRAVIA_E2E_EMAIL`/`PRAVIA_E2E_PASSWORD`.
+1. Revisar el informe del clasificador financiero y autorizar por separado cualquier backfill.
+2. Ejecutar y aprobar `projects:migrate-legacy`; el clasificador preserva incidencias y bloquea la retirada final del lector mientras existan referencias no resueltas o no se acepte expresamente su inaccesibilidad.
+3. Ejecutar E2E autenticado y regresión visual cuando existan `PRAVIA_E2E_EMAIL`/`PRAVIA_E2E_PASSWORD`.
