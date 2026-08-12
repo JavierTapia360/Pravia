@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyLegacyProject, type LegacyProjectCandidate } from './legacyProjectMigration';
+import { classifyLegacyProject, verifyMigratedLegacyProject, type LegacyProjectCandidate } from './legacyProjectMigration';
 
 const candidate: LegacyProjectCandidate = {
   source_id: 'ver_1', expediente_id: 'exp-1', kind: 'PROJECT_VERSION', file_name: 'proyecto.docx',
@@ -23,6 +23,19 @@ describe('clasificador de proyectos legacy', () => {
   it('prepara una clave de storage basada en hash para un registro migrable', () => {
     expect(classifyLegacyProject(candidate, { expediente_exists: true, file_exists: true, actual_size: 120, sha256: 'b'.repeat(64) })).toMatchObject({
       classification: 'MIGRABLE', proposed_storage_key: expect.stringContaining('/bbbbbbbbbbbbbbbb_proyecto.docx'),
+    });
+  });
+
+  it('solo marca verificado cuando DB, vínculo, Storage y repositorio moderno coinciden', () => {
+    const complete = {
+      document_exists: true, link_exists: true, expediente_matches: true, kind_matches: true,
+      storage_key_matches: true, metadata_source_matches: true, metadata_hash_matches: true,
+      storage_downloaded: true, storage_hash_matches: true, modern_repository_resolves: true,
+      modern_repository_hash_matches: true,
+    };
+    expect(verifyMigratedLegacyProject(complete)).toEqual({ verified: true, failures: [] });
+    expect(verifyMigratedLegacyProject({ ...complete, storage_hash_matches: false })).toMatchObject({
+      verified: false, failures: ['El hash descargado desde Storage no coincide con el origen.'],
     });
   });
 });

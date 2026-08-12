@@ -109,6 +109,19 @@ export class ProjectRepository {
     return document ? { record: mapProjectReport(document), storageKey: document.storage_key } : null;
   }
 
+  async getReport(expedienteId: string, reportId: string) {
+    const document = await this.db.documento.findFirst({
+      where: { id: reportId, expediente_id: expedienteId, tipo: 'REPORTE_IA_PROYECTO' },
+    });
+    return document ? { record: mapProjectReport(document), storageKey: document.storage_key } : null;
+  }
+
+  async loadReportBuffer(expedienteId: string, reportId: string) {
+    const report = await this.getReport(expedienteId, reportId);
+    if (!report) return null;
+    return { record: report.record, buffer: await downloadFile(report.storageKey) };
+  }
+
   async loadLatestReportBuffer(expedienteId: string) {
     const report = await this.latestReport(expedienteId);
     if (!report) return null;

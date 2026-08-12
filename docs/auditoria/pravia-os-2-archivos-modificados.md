@@ -1,6 +1,6 @@
 # Archivos modificados — PRAVIA OS 2
 
-Comparación exacta de `origin/main` contra la rama `codex/pravia-os-2-consolidation` al cierre. Total: **127 rutas**.
+Comparación exacta de `origin/main` contra la rama `codex/pravia-os-2-consolidation` al cierre. Total: **128 rutas**.
 
 Leyenda: `A` añadido, `M` modificado, `D` eliminado.
 
@@ -76,6 +76,7 @@ A	docs/auditoria/pravia-os-2-cierre-premerge.md
 M	docs/calidad/fase-13-testing-produccion.md
 A	docs/migrations/LEGACY_FINANCE.md
 A	docs/migrations/LOCAL_LEGACY_PROJECTS.md
+A	docs/migrations/LOCAL_LEGACY_MIGRATION_REPORT.md
 M	docs/operacion/despliegue-produccion.md
 A	docs/security/RBAC.md
 M	frontend/index.html

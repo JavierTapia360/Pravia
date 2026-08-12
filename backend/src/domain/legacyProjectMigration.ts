@@ -24,6 +24,25 @@ export interface LegacyProjectEvidence {
   version_collision?: boolean;
 }
 
+export interface LegacyProjectVerificationEvidence {
+  document_exists: boolean;
+  link_exists: boolean;
+  expediente_matches: boolean;
+  kind_matches: boolean;
+  storage_key_matches: boolean;
+  metadata_source_matches: boolean;
+  metadata_hash_matches: boolean;
+  storage_downloaded: boolean;
+  storage_hash_matches: boolean;
+  modern_repository_resolves: boolean;
+  modern_repository_hash_matches: boolean;
+}
+
+export interface LegacyProjectVerificationDecision {
+  verified: boolean;
+  failures: string[];
+}
+
 export interface LegacyProjectDecision {
   classification: LegacyProjectClassification;
   reason: string;
@@ -64,4 +83,22 @@ export function classifyLegacyProject(candidate: LegacyProjectCandidate, evidenc
     reason: 'Expediente, metadata, tamaño y hash permiten preparar una carga persistente trazable.',
     proposed_storage_key: `legacy-migrations/expedientes/${candidate.expediente_id}/${evidence.sha256.slice(0, 16)}_${safeName}`,
   };
+}
+
+export function verifyMigratedLegacyProject(evidence: LegacyProjectVerificationEvidence): LegacyProjectVerificationDecision {
+  const checks: Array<[keyof LegacyProjectVerificationEvidence, string]> = [
+    ['document_exists', 'La metadata persistente no existe.'],
+    ['link_exists', 'El vínculo con el expediente no existe.'],
+    ['expediente_matches', 'La metadata apunta a otro expediente.'],
+    ['kind_matches', 'El tipo documental persistente no corresponde al registro legacy.'],
+    ['storage_key_matches', 'La clave de Storage no coincide con la metadata.'],
+    ['metadata_source_matches', 'La referencia al origen legacy no quedó preservada.'],
+    ['metadata_hash_matches', 'El hash legacy no coincide con la metadata persistente.'],
+    ['storage_downloaded', 'El binario no pudo descargarse desde Storage.'],
+    ['storage_hash_matches', 'El hash descargado desde Storage no coincide con el origen.'],
+    ['modern_repository_resolves', 'El repositorio moderno no puede resolver el documento.'],
+    ['modern_repository_hash_matches', 'El binario resuelto por el repositorio moderno no conserva el hash.'],
+  ];
+  const failures = checks.filter(([key]) => !evidence[key]).map(([, message]) => message);
+  return { verified: failures.length === 0, failures };
 }

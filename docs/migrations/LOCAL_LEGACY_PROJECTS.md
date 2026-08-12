@@ -19,14 +19,16 @@ Desde `backend/`:
 ```bash
 npm run projects:migrate-legacy -- \
   --legacy-root=/ruta/verificada/uploads \
-  --output-dir=/ruta/segura/reporte
+  --output-dir=/ruta/segura/reporte \
+  --environment-label=staging-migracion-legacy \
+  --expected-project-ref=<PROJECT_REF_STAGING>
 ```
 
 El comando es de solo lectura sobre PostgreSQL y los archivos locales. Produce JSON por stdout y, al indicar `--output-dir`, genera:
 
-- `legacy-projects.json`
-- `legacy-projects.md`
-- `legacy-projects.csv`
+- `LOCAL_LEGACY_MIGRATION_REPORT.json`
+- `LOCAL_LEGACY_MIGRATION_REPORT.md`
+- `LOCAL_LEGACY_MIGRATION_REPORT.csv`
 
 Cada fila conserva la referencia, clasificación, razón, tamaño, SHA-256 y clave de storage propuesta. Si el archivo no existe, no se crea ningún sustituto.
 
@@ -36,14 +38,19 @@ El modo de escritura no debe ejecutarse hasta revisar y firmar el dry-run, respa
 
 ```bash
 LEGACY_PROJECT_MIGRATION_APPLY=I_UNDERSTAND_THIS_WRITES_POSTGRES_AND_STORAGE \
+LEGACY_PROJECT_MIGRATION_ENVIRONMENT=staging-migracion-legacy \
 npm run projects:migrate-legacy -- \
   --apply \
   --actor-user-id=<UUID_ACTOR_AUDITABLE> \
   --legacy-root=/ruta/verificada/uploads \
-  --output-dir=/ruta/segura/reporte-aplicado
+  --output-dir=/ruta/segura/reporte-aplicado \
+  --environment-label=staging-migracion-legacy \
+  --expected-project-ref=<PROJECT_REF_STAGING>
 ```
 
-El script se niega a escribir si el storage primario no es cloud. Para cada registro migrable carga primero el binario, crea `Documento` y `ExpedienteDocumento` en transacción y elimina el objeto subido si falla PostgreSQL. El hash y `legacy_source_id` quedan en metadata para idempotencia.
+El script se niega a conectarse si `NODE_ENV=production`, si la etiqueta contiene `prod`, si base y Storage no pertenecen al mismo proyecto Supabase o si el project ref no coincide con el esperado. Para cada registro migrable comprueba primero la clave remota determinista, reutiliza el objeto solo si el SHA-256 coincide, crea o reconcilia `Documento` y `ExpedienteDocumento` en transacción y compensa únicamente el objeto cloud recién subido si falla PostgreSQL. Nunca elimina el archivo legacy.
+
+Después verifica el 100 %: descarga desde Storage, recalcula hash, comprueba metadata y vínculo, y vuelve a descargar mediante `ProjectRepository` sin recurrir al reader legacy. Solo entonces usa `MIGRADO_VERIFICADO`. Las fechas y el autor legacy se preservan cuando son válidos y resolubles; cualquier ambigüedad queda trazada junto con el actor técnico de migración.
 
 ## Cierre
 
