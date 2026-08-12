@@ -98,33 +98,33 @@ export const ExpedientesPanel: React.FC<Props> = ({
   };
 
   return (
-    <div className="bg-slate-900/90 border border-white/10 rounded-2xl shadow-2xl overflow-hidden p-6 sm:p-8 space-y-6">
+    <section className="surface-card overflow-hidden p-5 sm:p-6 space-y-6" aria-labelledby="expedientes-registrados">
       
       {/* 1. PANEL HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-white/10">
+      <div className="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gold/10 border border-gold/20 flex items-center justify-center text-gold shadow-sm">
             <Folder size={20} />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-xl font-extrabold text-white tracking-tight">Expedientes Registrados</h2>
-              <span className="text-xs font-bold font-mono px-2 py-0.5 rounded-full bg-gold/10 text-gold border border-gold/20">
+              <h2 id="expedientes-registrados" className="text-xl font-bold text-slate-950 tracking-tight">Expedientes registrados</h2>
+              <span className="badge badge-warning normal-case tracking-normal">
                 {totalItems} expedientes
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="mt-1 text-sm text-slate-600">
               Gestión operativa, seguimiento de etapas notariales y control documental en PRAVIA OS
             </p>
           </div>
         </div>
 
         {/* Primary Header Action Buttons */}
-        <div className="flex items-center gap-2.5 self-end md:self-auto">
+        <div className="module-actions">
           <button
             onClick={onRefresh}
             title="Recargar Expedientes"
-            className="h-10 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-white/10 text-slate-300 hover:text-white transition-all flex items-center gap-2 text-xs font-semibold"
+            className="btn btn-secondary btn-md"
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             <span className="hidden sm:inline">Actualizar</span>
@@ -132,7 +132,7 @@ export const ExpedientesPanel: React.FC<Props> = ({
 
           <button
             onClick={onOpenConvert}
-            className="h-10 px-4 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-white/10 hover:border-gold/40 text-slate-200 text-xs font-semibold flex items-center gap-2 transition-all shadow-sm"
+            className="btn btn-secondary btn-md"
           >
             <ArrowRightLeft size={15} className="text-gold" />
             <span>Convertir Cotización</span>
@@ -140,7 +140,7 @@ export const ExpedientesPanel: React.FC<Props> = ({
 
           <button
             onClick={onOpenCreate}
-            className="h-10 px-4 rounded-xl bg-gold hover:bg-gold-light text-slate-950 text-xs font-bold flex items-center gap-2 transition-all shadow-md hover:shadow-gold/20"
+            className="btn btn-primary btn-md"
           >
             <Plus size={16} />
             <span>Nuevo Expediente</span>
@@ -149,7 +149,7 @@ export const ExpedientesPanel: React.FC<Props> = ({
       </div>
 
       {/* 2. DEDICATED CONTROL BAR (BUSQUEDA Y FILTROS) */}
-      <div className="bg-slate-950/70 border border-white/10 rounded-xl p-4 space-y-3.5 shadow-inner">
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
         {/* Upper Row: Wide Search Input & Dropdowns */}
         <div className="flex flex-col lg:flex-row items-center gap-3">
           
@@ -164,12 +164,12 @@ export const ExpedientesPanel: React.FC<Props> = ({
                 setFilters({ search: e.target.value });
                 setCurrentPage(1);
               }}
-              className="w-full bg-slate-900/90 border border-white/10 rounded-xl pl-10 pr-9 py-2.5 text-sm text-slate-100 placeholder-slate-400 focus:outline-none focus:border-gold focus:ring-1 focus:ring-gold/30 transition-all"
+              className="control-height w-full rounded-xl border border-slate-300 bg-white pl-10 pr-9 text-sm text-slate-900 placeholder-slate-500 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-800/15"
             />
             {filters.search && (
               <button
                 onClick={() => setFilters({ search: '' })}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-900"
               >
                 <X size={14} />
               </button>
@@ -184,10 +184,10 @@ export const ExpedientesPanel: React.FC<Props> = ({
                 setFilters({ estatus: e.target.value });
                 setCurrentPage(1);
               }}
-              className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-200 focus:outline-none focus:border-gold cursor-pointer"
+              className="control-height w-full rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-800 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-800/15"
             >
               {ESTATUS_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value} className="bg-slate-900 text-white">
+                <option key={opt.value} value={opt.value}>
                   {opt.label}
                 </option>
               ))}
@@ -199,20 +199,20 @@ export const ExpedientesPanel: React.FC<Props> = ({
             <select
               value={sortBy}
               onChange={(e) => handleSortToggle(e.target.value as any)}
-              className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-200 focus:outline-none focus:border-gold cursor-pointer"
+              className="control-height w-full rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-800 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-800/15"
             >
-              <option value="updated_at" className="bg-slate-900 text-white">Ordenar: Última Actualización</option>
-              <option value="numero_pravia" className="bg-slate-900 text-white">Ordenar: Folio PRAVIA</option>
-              <option value="valor_operacion" className="bg-slate-900 text-white">Ordenar: Valor Operación</option>
-              <option value="avance_general" className="bg-slate-900 text-white">Ordenar: Avance Operativo</option>
+              <option value="updated_at">Ordenar: Última actualización</option>
+              <option value="numero_pravia">Ordenar: Folio PRAVIA</option>
+              <option value="valor_operacion">Ordenar: Valor de operación</option>
+              <option value="avance_general">Ordenar: Avance operativo</option>
             </select>
           </div>
         </div>
 
         {/* Lower Row: Quick Filter Pills */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-1.5 flex items-center gap-1">
-            <Filter size={11} /> Estatus Rápido:
+          <span className="mr-1.5 flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-slate-500">
+            <Filter size={13} /> Estatus rápido:
           </span>
           {QUICK_PILLS.map((p) => {
             const isActive = filters.estatus === p.value;
@@ -225,8 +225,8 @@ export const ExpedientesPanel: React.FC<Props> = ({
                 }}
                 className={`px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap border ${
                   isActive
-                    ? 'bg-gold text-slate-950 border-gold shadow-sm font-bold'
-                    : 'bg-slate-900/80 text-slate-400 border-white/10 hover:border-white/20 hover:text-slate-200'
+                    ? 'bg-amber-700 text-white border-amber-700 shadow-sm font-bold'
+                    : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400 hover:text-slate-950'
                 }`}
               >
                 {p.label}
@@ -249,18 +249,18 @@ export const ExpedientesPanel: React.FC<Props> = ({
       </div>
 
       {/* 3. STRUCTURED DATA TABLE */}
-      <div className="border border-white/10 rounded-xl overflow-hidden bg-slate-950/40">
+      <div className="data-surface">
         {loading && expedientes.length === 0 ? (
-          <div className="p-16 text-center text-slate-400 flex flex-col items-center justify-center">
+          <div className="p-16 text-center text-slate-600 flex flex-col items-center justify-center">
             <RefreshCw size={32} className="animate-spin text-gold mb-3" />
-            <p className="text-sm font-semibold text-white">Cargando datos de expedientes...</p>
-            <p className="text-xs text-slate-400 mt-1">Conectando con el backend de PRAVIA OS</p>
+            <p className="text-base font-semibold text-slate-900">Cargando datos de expedientes…</p>
+            <p className="text-sm text-slate-500 mt-1">Preparando el catálogo operativo</p>
           </div>
         ) : totalItems === 0 ? (
-          <div className="p-16 text-center text-slate-400 flex flex-col items-center justify-center space-y-3">
+          <div className="p-16 text-center text-slate-600 flex flex-col items-center justify-center space-y-3">
             <FileText size={44} className="text-slate-600 mb-1" />
-            <h4 className="text-base font-bold text-white">No se encontraron expedientes</h4>
-            <p className="text-xs text-slate-400 max-w-md">
+            <h4 className="text-lg font-bold text-slate-900">No se encontraron expedientes</h4>
+            <p className="text-sm text-slate-500 max-w-md">
               {filters.search || filters.estatus
                 ? 'Prueba ajustando o limpiando los criterios de búsqueda y filtros aplicados.'
                 : 'Apertura un expediente directo o convierte una cotización aceptada para iniciar.'}
@@ -268,17 +268,17 @@ export const ExpedientesPanel: React.FC<Props> = ({
             {(filters.search || filters.estatus) && (
               <button
                 onClick={() => setFilters({ search: '', estatus: '' })}
-                className="mt-2 px-4 py-2 rounded-xl bg-slate-800 border border-white/10 hover:border-gold/40 text-xs font-semibold text-white transition-all"
+                className="btn btn-secondary btn-md mt-2"
               >
                 Limpiar Filtros de Búsqueda
               </button>
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+          <div className="data-table-scroll">
+            <table className="data-table min-w-[1120px]">
               <thead>
-                <tr className="bg-slate-900/90 border-b border-white/10 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <tr>
                   <th 
                     onClick={() => handleSortToggle('numero_pravia')}
                     className="py-3.5 px-5 w-36 cursor-pointer hover:text-gold transition-colors"
@@ -304,7 +304,7 @@ export const ExpedientesPanel: React.FC<Props> = ({
                   <th className="py-3.5 px-5 w-32 text-right">Acción</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5 text-sm">
+              <tbody>
                 {paginatedData.map((exp) => (
                   <tr
                     key={exp.id}
@@ -318,24 +318,24 @@ export const ExpedientesPanel: React.FC<Props> = ({
 
                     {/* Cliente / Alias */}
                     <td className="py-4 px-5">
-                      <p className="font-bold text-slate-100 group-hover:text-gold transition-colors truncate max-w-[240px]">
+                      <p className="font-bold text-slate-950 group-hover:text-amber-800 transition-colors truncate max-w-[240px]">
                         {exp.cliente_alias}
                       </p>
-                      <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5 truncate max-w-[240px]">
+                      <p className="text-[13px] text-slate-600 flex items-center gap-1 mt-1 truncate max-w-[240px]">
                         <UserCheck size={12} className="text-slate-400 shrink-0" />
                         <span>Abogado: {exp.abogado ? `${exp.abogado.nombre} ${exp.abogado.apellido}` : 'Asignado'}</span>
                       </p>
                     </td>
 
                     {/* Tipo de Acto */}
-                    <td className="py-4 px-5 text-slate-300 text-xs font-medium whitespace-nowrap">
-                      <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-white/5">
+                    <td className="py-4 px-5 text-slate-700 text-[13px] font-medium whitespace-nowrap">
+                      <span className="px-2.5 py-1 rounded-lg bg-slate-100 border border-slate-200">
                         {exp.tipo_acto?.nombre || 'Compraventa Inmobiliaria'}
                       </span>
                     </td>
 
                     {/* Etapa Operativa Actual */}
-                    <td className="py-4 px-5 text-xs text-slate-200 font-medium whitespace-nowrap">
+                    <td className="py-4 px-5 text-[13px] text-slate-700 font-medium whitespace-nowrap">
                       <div className="flex items-center gap-1.5 truncate max-w-[200px]">
                         <Clock size={13} className="text-gold shrink-0" />
                         <span className="truncate">{exp.etapa_actual_nombre || 'Apertura de Expediente'}</span>
@@ -352,11 +352,11 @@ export const ExpedientesPanel: React.FC<Props> = ({
                     {/* Avance General (%) */}
                     <td className="py-4 px-5 whitespace-nowrap">
                       <div className="w-28">
-                        <div className="flex justify-between text-[11px] font-bold text-slate-300 mb-1">
+                        <div className="flex justify-between text-xs font-bold text-slate-600 mb-1.5">
                           <span>Operativo</span>
                           <span className="text-gold">{exp.avance_general}%</span>
                         </div>
-                        <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-white/10">
+                        <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
                           <div
                             className="h-full bg-gradient-to-r from-gold/70 to-gold rounded-full transition-all duration-500"
                             style={{ width: `${exp.avance_general}%` }}
@@ -372,7 +372,7 @@ export const ExpedientesPanel: React.FC<Props> = ({
                           e.stopPropagation();
                           onOpenDetail(exp.id);
                         }}
-                        className="px-3 py-1.5 rounded-lg bg-slate-800/90 hover:bg-gold hover:text-slate-950 border border-white/10 text-slate-200 transition-all inline-flex items-center gap-1.5 text-xs font-bold shadow-sm"
+                        className="btn btn-secondary btn-sm whitespace-nowrap"
                       >
                         <Eye size={14} />
                         <span>Ver Detalle</span>
@@ -387,7 +387,7 @@ export const ExpedientesPanel: React.FC<Props> = ({
 
         {/* 4. PAGINATION FOOTER */}
         {totalItems > 0 && (
-          <div className="px-5 py-4 bg-slate-900/90 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+          <div className="data-table-pagination">
             <div className="flex items-center gap-3">
               <span>
                 Mostrando <strong>{Math.min(totalItems, (currentPage - 1) * itemsPerPage + 1)}</strong> - <strong>{Math.min(totalItems, currentPage * itemsPerPage)}</strong> de <strong>{totalItems}</strong> expedientes
@@ -395,14 +395,14 @@ export const ExpedientesPanel: React.FC<Props> = ({
 
               {/* Items per page selector */}
               <div className="flex items-center gap-1.5 ml-2">
-                <span className="text-[11px] text-slate-400">Mostrar:</span>
+                <span className="text-xs text-slate-600">Mostrar:</span>
                 <select
                   value={itemsPerPage}
                   onChange={(e) => {
                     setItemsPerPage(Number(e.target.value));
                     setCurrentPage(1);
                   }}
-                  className="bg-slate-800 border border-white/10 rounded-md px-2 py-0.5 text-xs text-white focus:outline-none focus:border-gold"
+                  className="control-height rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-900 focus:border-blue-800 focus:outline-none"
                 >
                   <option value={5}>5</option>
                   <option value={8}>8</option>
@@ -417,20 +417,20 @@ export const ExpedientesPanel: React.FC<Props> = ({
               <button
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                 disabled={currentPage === 1}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 border border-white/10 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all text-white flex items-center gap-1 text-xs font-medium"
+                className="btn btn-secondary btn-sm"
               >
                 <ChevronLeft size={14} />
                 <span>Anterior</span>
               </button>
 
-              <div className="px-3 py-1 bg-slate-950 border border-white/10 rounded-lg text-slate-200 font-mono font-bold text-xs">
+              <div className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 font-mono font-bold text-xs">
                 {currentPage} / {totalPages}
               </div>
 
               <button
                 onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                 disabled={currentPage === totalPages}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 border border-white/10 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all text-white flex items-center gap-1 text-xs font-medium"
+                className="btn btn-secondary btn-sm"
               >
                 <span>Siguiente</span>
                 <ChevronRight size={14} />
@@ -440,6 +440,6 @@ export const ExpedientesPanel: React.FC<Props> = ({
         )}
       </div>
 
-    </div>
+    </section>
   );
 };
