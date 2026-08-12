@@ -42,6 +42,8 @@ export interface DocumentExtractionResult {
   domicilios_detectados?: DomicilioDetectado[];
   actividades_economicas?: Array<{ actividad: string; porcentaje?: string; tipo?: string }>;
   regimenes?: string[];
+  uso?: AIUsageMetrics;
+  usos?: AIUsageMetrics[];
 }
 
 export interface DocumentoParaExtraccion {
@@ -68,6 +70,21 @@ export interface ProyectoAnalysisResult {
   resumen_ejecutivo: string;
   observaciones: ProyectoObservation[];
   documentos_no_leidos: string[];
+  uso?: AIUsageMetrics;
+}
+
+export interface AIUsageMetrics {
+  modelo: string;
+  input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  duracion_ms: number;
+  documentos_enviados: number;
+  costo_estimado_usd: number;
+  precios_version: string;
+  escalamiento_utilizado: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -157,7 +174,60 @@ export function autoridadPorTipoDocumento(tipoDoc: string): string | null {
  * Retorna el modelo de OpenAI utilizado para análisis documental.
  */
 export function getOpenAIModelName(): string {
-  return (process.env.OPENAI_DOCUMENT_MODEL || process.env.AI_DOCUMENT_MODEL || 'gpt-5-mini').trim();
+  const configured = (process.env.OPENAI_DOCUMENT_MODEL || process.env.AI_DOCUMENT_MODEL || '').trim();
+  return /^gpt-5\.4-nano(?:-|$)/.test(configured) ? configured : 'gpt-5.4-nano';
+}
+
+export function getOpenAIEscalationModelName(): string {
+  const configured = (process.env.OPENAI_ESCALATION_MODEL || '').trim();
+  return /^gpt-5\.4-mini(?:-|$)/.test(configured) ? configured : 'gpt-5.4-mini';
+}
+
+function getReasoningEffort(): 'none' | 'low' | 'medium' | 'high' | 'xhigh' {
+  const configured = (process.env.OPENAI_REASONING_EFFORT || 'high').trim().toLowerCase();
+  return ['none', 'low', 'medium', 'high', 'xhigh'].includes(configured)
+    ? configured as 'none' | 'low' | 'medium' | 'high' | 'xhigh'
+    : 'high';
+}
+
+const OPENAI_PRICING_USD_PER_MILLION: Record<string, { input: number; cached: number; output: number }> = {
+  'gpt-5.4-nano': { input: 0.20, cached: 0.02, output: 1.25 },
+  'gpt-5.4-nano-2026-03-17': { input: 0.20, cached: 0.02, output: 1.25 },
+  'gpt-5.4-mini': { input: 0.75, cached: 0.075, output: 4.50 },
+  'gpt-5.4-mini-2026-03-17': { input: 0.75, cached: 0.075, output: 4.50 },
+};
+
+function buildUsageMetrics(
+  data: any,
+  model: string,
+  startedAt: number,
+  documentCount: number,
+  escalated = false
+): AIUsageMetrics {
+  const inputTokens = Number(data?.usage?.input_tokens || 0);
+  const cachedInputTokens = Number(data?.usage?.input_tokens_details?.cached_tokens || 0);
+  const outputTokens = Number(data?.usage?.output_tokens || 0);
+  const reasoningTokens = Number(data?.usage?.output_tokens_details?.reasoning_tokens || 0);
+  const totalTokens = Number(data?.usage?.total_tokens || inputTokens + outputTokens);
+  const pricing = OPENAI_PRICING_USD_PER_MILLION[model];
+  const regularInputTokens = Math.max(0, inputTokens - cachedInputTokens);
+  const estimatedCost = pricing
+    ? ((regularInputTokens * pricing.input) + (cachedInputTokens * pricing.cached) + (outputTokens * pricing.output)) / 1_000_000
+    : 0;
+
+  return {
+    modelo: model,
+    input_tokens: inputTokens,
+    cached_input_tokens: cachedInputTokens,
+    output_tokens: outputTokens,
+    reasoning_tokens: reasoningTokens,
+    total_tokens: totalTokens,
+    duracion_ms: Date.now() - startedAt,
+    documentos_enviados: documentCount,
+    costo_estimado_usd: Number(estimatedCost.toFixed(6)),
+    precios_version: '2026-08-11',
+    escalamiento_utilizado: escalated,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -172,11 +242,12 @@ export function getOpenAIModelName(): string {
  * Mensaje de error: "No fue posible ejecutar la extracción documental con IA.
  * Los campos permanecen sin cambios."
  */
-export async function extraerMultiplesDocumentos(
-  documentos: DocumentoParaExtraccion[]
+async function executeDocumentExtraction(
+  documentos: DocumentoParaExtraccion[],
+  model: string,
+  escalated = false
 ): Promise<DocumentExtractionResult> {
   const apiKey = process.env.OPENAI_API_KEY;
-  const model = getOpenAIModelName();
 
   if (!apiKey) {
     throw new Error('La clave de API de OpenAI no está configurada.');
@@ -328,6 +399,7 @@ No agregues texto antes ni después del JSON.`;
   }
 
   const endpoint = 'https://api.openai.com/v1/responses';
+  const startedAt = Date.now();
   const responseSchema = {
     type: 'object',
     additionalProperties: false,
@@ -411,6 +483,7 @@ No agregues texto antes ni después del JSON.`;
         model,
         store: false,
         input: [{ role: 'user', content }],
+        reasoning: { effort: getReasoningEffort() },
         max_output_tokens: 8192,
         text: {
           format: {
@@ -478,7 +551,54 @@ No agregues texto antes ni después del JSON.`;
     alertas: parsed.alertas || [],
     domicilios_detectados: parsed.domicilios_detectados || [],
     actividades_economicas: parsed.actividades_economicas || [],
-    regimenes: parsed.regimenes || []
+    regimenes: parsed.regimenes || [],
+    uso: buildUsageMetrics(data, model, startedAt, documentos.length, escalated),
+  };
+}
+
+function escalationCandidates(result: DocumentExtractionResult) {
+  const byField = new Map<string, ExtractedField[]>();
+  const documentIds = new Set<string>();
+  const reasons: string[] = [];
+  for (const field of result.campos) {
+    const list = byField.get(field.campo) || [];
+    list.push(field);
+    byField.set(field.campo, list);
+    if (field.confianza !== 'LECTURA_CLARA') {
+      reasons.push(`lectura ${field.confianza.toLowerCase()} en ${field.campo}`);
+      if (field.documento_id) documentIds.add(field.documento_id);
+    }
+  }
+  for (const [fieldName, fields] of byField) {
+    const values = new Set(fields.map((field) => field.valor.trim().toUpperCase()).filter(Boolean));
+    if (values.size > 1) {
+      reasons.push(`fuentes contradictorias para ${fieldName}`);
+      for (const field of fields) if (field.documento_id) documentIds.add(field.documento_id);
+    }
+  }
+  return { required: reasons.length > 0, reasons: [...new Set(reasons)], documentIds: [...documentIds] };
+}
+
+export async function extraerMultiplesDocumentos(
+  documentos: DocumentoParaExtraccion[]
+): Promise<DocumentExtractionResult> {
+  const primary = await executeDocumentExtraction(documentos, getOpenAIModelName(), false);
+  const escalation = escalationCandidates(primary);
+  const escalationEnabled = String(process.env.AI_ESCALATION_ENABLED || 'true').toLowerCase() !== 'false';
+  if (!escalation.required || !escalationEnabled) return { ...primary, usos: primary.uso ? [primary.uso] : [] };
+
+  const selected = escalation.documentIds.length
+    ? documentos.filter((document) => escalation.documentIds.includes(document.documentoId)).slice(0, 4)
+    : documentos.slice(0, 4);
+  const escalated = await executeDocumentExtraction(selected, getOpenAIEscalationModelName(), true);
+  return {
+    ...escalated,
+    alertas: [
+      ...primary.alertas,
+      ...escalated.alertas,
+      `Revisión escalada por: ${escalation.reasons.join('; ')}.`,
+    ],
+    usos: [primary.uso, escalated.uso].filter((usage): usage is AIUsageMetrics => Boolean(usage)),
   };
 }
 
@@ -487,7 +607,8 @@ export async function analizarProyectoNotarialConOpenAI(
   documentosSoporte: DocumentoParaExtraccion[]
 ): Promise<ProyectoAnalysisResult> {
   const apiKey = process.env.OPENAI_API_KEY;
-  const model = getOpenAIModelName();
+  const model = getOpenAIEscalationModelName();
+  const startedAt = Date.now();
   if (!apiKey) throw new Error('La clave de API de OpenAI no está configurada.');
 
   const content: any[] = [{
@@ -580,6 +701,7 @@ export async function analizarProyectoNotarialConOpenAI(
       model,
       store: false,
       input: [{ role: 'user', content }],
+      reasoning: { effort: getReasoningEffort() },
       max_output_tokens: 8192,
       text: {
         format: {
@@ -617,7 +739,8 @@ export async function analizarProyectoNotarialConOpenAI(
     modelo: model,
     resumen_ejecutivo: parsed.resumen_ejecutivo || '',
     observaciones: Array.isArray(parsed.observaciones) ? parsed.observaciones : [],
-    documentos_no_leidos: documentosNoLeidos
+    documentos_no_leidos: documentosNoLeidos,
+    uso: buildUsageMetrics(data, model, startedAt, 1 + documentosSoporte.length, true),
   };
 }
 

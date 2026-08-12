@@ -1,5 +1,6 @@
-import { PrismaClient, TipoPersona, FormaComparecencia } from '@prisma/client';
+import { Prisma, PrismaClient, TipoPersona, FormaComparecencia, TipoDocumentoCompareciente } from '@prisma/client';
 import * as crypto from 'crypto';
+import { validateCurp, validateOptionalDate, validateRfc } from '../domain/mexicanIdentity';
 
 export class ComparecienteService {
   private prisma: PrismaClient;
@@ -121,6 +122,7 @@ export class ComparecienteService {
           personaMoral: true,
           domicilios: { where: { principal: true, vigente: true, archived_at: null } },
           contactos: { where: { principal: true, activo: true, archived_at: null } },
+          aliases: { where: { activo: true, archived_at: null }, orderBy: { principal: 'desc' } },
           expedientes: {
             where: { estatus: 'ACTIVO', archived_at: null },
             include: { expediente: true, caracter: true }
@@ -178,6 +180,12 @@ export class ComparecienteService {
         domicilios: { where: { archived_at: null } },
         contactos: { where: { archived_at: null } },
         identificaciones: { where: { archived_at: null } },
+        aliases: { where: { activo: true, archived_at: null }, orderBy: [{ principal: 'desc' }, { created_at: 'asc' }] },
+        actividadesEconomicas: {
+          where: { vigente: true },
+          include: { actividad: true },
+          orderBy: [{ principal: 'desc' }, { created_at: 'asc' }],
+        },
         documentos: {
           where: { archived_at: null },
           include: { documento: true }
@@ -209,13 +217,19 @@ export class ComparecienteService {
     sexo?: any;
     fecha_nacimiento?: string;
     lugar_nacimiento?: string;
+    pais_nacimiento?: string;
     nacionalidad?: string;
     curp?: string;
     rfc?: string;
     estado_civil?: any;
     regimen_matrimonial?: any;
     ocupacion?: string;
+    escolaridad?: string;
     actividad_economica?: string;
+    giro?: string;
+    pep_estado?: 'PENDIENTE' | 'SI' | 'NO';
+    relacion_pep?: string;
+    aliases?: string[];
     domicilio_principal?: any;
     contacto_principal?: any;
     identificacion_principal?: any;
@@ -227,8 +241,28 @@ export class ComparecienteService {
       .trim();
 
     const nombreBusqueda = this.normalizeSearchString(nombreCompleto);
+    if (!nombreBusqueda) throw new Error('El nombre de la persona física es obligatorio.');
+    const cleanCurp = validateCurp(dto.curp);
+    const cleanRfc = validateRfc(dto.rfc, 'FISICA');
+    const birthDate = validateOptionalDate(dto.fecha_nacimiento, 'La fecha de nacimiento');
 
     return await this.prisma.$transaction(async (tx) => {
+      const identityKey = cleanCurp || cleanRfc || nombreBusqueda;
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:compareciente:${identityKey}`}))`);
+      const duplicate = await tx.personaFisica.findFirst({
+        where: {
+          archived_at: null,
+          OR: [
+            ...(cleanCurp ? [{ curp: { equals: cleanCurp, mode: 'insensitive' as const } }] : []),
+            ...(cleanRfc ? [{ rfc: { equals: cleanRfc, mode: 'insensitive' as const } }] : []),
+          ],
+        },
+        select: { compareciente_id: true },
+      });
+      if (duplicate) {
+        throw new Error(`Ya existe una persona física con la misma ${cleanCurp ? 'CURP' : 'RFC'} (${duplicate.compareciente_id}).`);
+      }
+
       // 1. Crear cabecera compareciente
       const compareciente = await tx.compareciente.create({
         data: {
@@ -247,17 +281,29 @@ export class ComparecienteService {
           apellido_materno: dto.apellido_materno?.trim(),
           nombre_completo_calculado: nombreCompleto,
           sexo: dto.sexo,
-          fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
+          fecha_nacimiento: birthDate,
           lugar_nacimiento: dto.lugar_nacimiento,
+          pais_nacimiento: dto.pais_nacimiento,
           nacionalidad: dto.nacionalidad || 'Mexicana',
-          curp: dto.curp ? dto.curp.trim().toUpperCase() : null,
-          rfc: dto.rfc ? dto.rfc.trim().toUpperCase() : null,
+          curp: cleanCurp,
+          rfc: cleanRfc,
           estado_civil: dto.estado_civil,
           regimen_matrimonial: dto.regimen_matrimonial,
           ocupacion: dto.ocupacion,
-          actividad_economica: dto.actividad_economica
+          escolaridad: dto.escolaridad,
+          actividad_economica: dto.actividad_economica,
+          giro: dto.giro,
+          pep: dto.pep_estado === 'SI',
+          pep_estado: dto.pep_estado || 'PENDIENTE',
+          relacion_pep: dto.pep_estado === 'SI' ? dto.relacion_pep : null,
         }
       });
+
+      for (const [index, alias] of (dto.aliases || []).map((value) => value.trim()).filter(Boolean).entries()) {
+        await tx.comparecienteAlias.create({
+          data: { compareciente_id: compareciente.id, alias, principal: index === 0 },
+        });
+      }
 
       // 3. Crear Domicilio principal si se proporciona
       if (dto.domicilio_principal) {
@@ -272,6 +318,8 @@ export class ComparecienteService {
             municipio: dto.domicilio_principal.municipio,
             estado: dto.domicilio_principal.estado,
             codigo_postal: dto.domicilio_principal.codigo_postal,
+            comprobado: Boolean(dto.domicilio_principal.comprobado),
+            documento_comprobante_id: dto.domicilio_principal.documento_comprobante_id || null,
             principal: true,
             creado_por_id: dto.creado_por_id
           }
@@ -339,8 +387,21 @@ export class ComparecienteService {
     creado_por_id: string;
   }) {
     const nombreBusqueda = this.normalizeSearchString(dto.razon_social);
+    if (!nombreBusqueda) throw new Error('La razón social es obligatoria.');
+    const cleanRfc = validateRfc(dto.rfc, 'MORAL');
+    const incorporationDate = validateOptionalDate(dto.fecha_constitucion, 'La fecha de constitución');
 
     return await this.prisma.$transaction(async (tx) => {
+      const identityKey = cleanRfc || nombreBusqueda;
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:compareciente:${identityKey}`}))`);
+      if (cleanRfc) {
+        const duplicate = await tx.personaMoral.findFirst({
+          where: { archived_at: null, rfc: { equals: cleanRfc, mode: 'insensitive' } },
+          select: { compareciente_id: true },
+        });
+        if (duplicate) throw new Error(`Ya existe una persona moral con el mismo RFC (${duplicate.compareciente_id}).`);
+      }
+
       // 1. Crear cabecera compareciente
       const compareciente = await tx.compareciente.create({
         data: {
@@ -358,8 +419,8 @@ export class ComparecienteService {
           nombre_comercial: dto.nombre_comercial?.trim(),
           tipo_societario: dto.tipo_societario,
           nacionalidad: dto.nacionalidad || 'Mexicana',
-          rfc: dto.rfc ? dto.rfc.trim().toUpperCase() : null,
-          fecha_constitucion: dto.fecha_constitucion ? new Date(dto.fecha_constitucion) : null,
+          rfc: cleanRfc,
+          fecha_constitucion: incorporationDate,
           folio_mercantil: dto.folio_mercantil,
           objeto_social_resumido: dto.objeto_social_resumido
         }
@@ -398,17 +459,11 @@ export class ComparecienteService {
     });
   }
 
-  /**
-   * Archiva (soft-delete) o elimina físicamente un compareciente.
-   * - Si tiene expedientes activos → sólo se permite archivar (soft-delete).
-   * - Si no tiene expedientes y modo='ELIMINAR' → eliminación física con confirmación.
-   * - Por defecto siempre archiva (nunca borra físico sin pedirlo explícitamente).
-   */
+  /** Archiva de forma reversible. Los comparecientes maestros nunca se eliminan físicamente. */
   public async archivarCompareciente(dto: {
     id: string;
     usuario_id: string;
     motivo?: string;
-    modo?: 'ARCHIVAR' | 'ELIMINAR';
   }) {
     const comp = await this.prisma.compareciente.findUnique({
       where: { id: dto.id },
@@ -426,25 +481,7 @@ export class ComparecienteService {
 
     const tieneExpedientesActivos = comp._count.expedientes > 0;
 
-    if (dto.modo === 'ELIMINAR' && !tieneExpedientesActivos) {
-      // Eliminación física con AuditLog previo
-      const correlationId = crypto.randomUUID();
-      await this.prisma.auditLog.create({
-        data: {
-          user_id: dto.usuario_id,
-          accion: 'ELIMINAR_COMPARECIENTE',
-          entidad: 'Compareciente',
-          entidad_id: dto.id,
-          valores_nuevos: { eliminado: true, motivo: dto.motivo || 'Sin motivo especificado' },
-          detalles: { modulo: 'COMPARECIENTES', modo: 'ELIMINACION_FISICA' },
-          correlation_id: correlationId
-        }
-      });
-      await this.prisma.compareciente.delete({ where: { id: dto.id } });
-      return { accion: 'ELIMINADO', id: dto.id };
-    }
-
-    // En cualquier otro caso → archivar (soft-delete)
+    // Siempre archivar; conservar identidad, documentos, relaciones y trazabilidad.
     const correlationId = crypto.randomUUID();
     const archivado = await this.prisma.compareciente.update({
       where: { id: dto.id },
@@ -462,7 +499,7 @@ export class ComparecienteService {
           modulo: 'COMPARECIENTES',
           modo: 'ARCHIVADO',
           tenia_expedientes_activos: tieneExpedientesActivos,
-          modo_solicitado: dto.modo || 'ARCHIVAR'
+          modo_solicitado: 'ARCHIVAR'
         },
         correlation_id: correlationId
       }
@@ -482,6 +519,9 @@ export class ComparecienteService {
     observaciones?: string;
     creado_por_id: string;
   }) {
+    if (!dto.expediente_id || !dto.compareciente_id || !dto.caracter_id) {
+      throw new Error('expediente_id, compareciente_id y caracter_id son obligatorios para crear el vínculo.');
+    }
     return await this.prisma.$transaction(async (tx) => {
       const existente = await tx.expedienteCompareciente.findFirst({
         where: {
@@ -603,6 +643,52 @@ export class ComparecienteService {
   }
 
   /**
+   * Confirmación humana contextual. La validación pertenece al vínculo con el
+   * expediente y nunca convierte automáticamente propuestas de IA en datos definitivos.
+   */
+  public async validarVinculoExpediente(vinculoId: string, actorUserId: string, datosValidados: boolean) {
+    return this.prisma.$transaction(async (tx) => {
+      const vinculo = await tx.expedienteCompareciente.findFirst({
+        where: { id: vinculoId, archived_at: null, estatus: 'ACTIVO' },
+      });
+      if (!vinculo) throw new Error(`El vínculo con ID '${vinculoId}' no existe o no está activo.`);
+
+      const actualizado = await tx.expedienteCompareciente.update({
+        where: { id: vinculoId },
+        data: {
+          datos_validados: datosValidados,
+          validado_por_id: datosValidados ? actorUserId : null,
+          validado_at: datosValidados ? new Date() : null,
+        },
+      });
+      const correlationId = crypto.randomUUID();
+      await tx.auditLog.create({
+        data: {
+          user_id: actorUserId,
+          accion: datosValidados ? 'VALIDAR_DATOS_COMPARECIENTE' : 'REABRIR_VALIDACION_COMPARECIENTE',
+          entidad: 'ExpedienteCompareciente',
+          entidad_id: vinculoId,
+          valores_anteriores: { datos_validados: vinculo.datos_validados, validado_por_id: vinculo.validado_por_id },
+          valores_nuevos: { datos_validados: actualizado.datos_validados, validado_por_id: actualizado.validado_por_id },
+          detalles: { modulo: 'COMPARECIENTES', expediente_id: vinculo.expediente_id },
+          correlation_id: correlationId,
+        },
+      });
+      await tx.domainEventOutbox.create({
+        data: {
+          event_type: datosValidados ? 'DatosComparecienteValidados' : 'ValidacionComparecienteReabierta',
+          aggregate_type: 'Expediente',
+          aggregate_id: vinculo.expediente_id,
+          actor_user_id: actorUserId,
+          payload: { expediente_id: vinculo.expediente_id, compareciente_id: vinculo.compareciente_id, vinculo_id: vinculoId },
+          correlation_id: correlationId,
+        },
+      });
+      return actualizado;
+    });
+  }
+
+  /**
    * Obtiene el Archivo Documental del Compareciente con URLs firmadas y agrupado por carpetas
    */
   public async obtenerArchivoDocumental(comparecienteId: string) {
@@ -673,39 +759,78 @@ export class ComparecienteService {
     fileName: string;
     mimeType: string;
     categoria: string;
+    fechaEmision?: string;
+    fechaVencimiento?: string;
+    observaciones?: string;
   }) {
     const { comparecienteId, userId, buffer, fileName, mimeType, categoria } = params;
-    const { uploadFile } = await import('./supabase.service');
+    const allowedMimeTypes = new Set([
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ]);
+    if (!allowedMimeTypes.has(mimeType)) {
+      throw new Error('Tipo de archivo no permitido. Usa PDF, JPG/JPEG, PNG, DOC o DOCX.');
+    }
+    if (!Object.values(TipoDocumentoCompareciente).includes(categoria as TipoDocumentoCompareciente)) {
+      throw new Error('La categoría documental seleccionada no es válida.');
+    }
+    const [compareciente, actor] = await Promise.all([
+      this.prisma.compareciente.findFirst({ where: { id: comparecienteId, archived_at: null }, select: { id: true } }),
+      this.prisma.user.findFirst({ where: { id: userId, activo: true }, select: { id: true } }),
+    ]);
+    if (!compareciente) throw new Error('Compareciente no encontrado o archivado.');
+    if (!actor) throw new Error('Usuario activo requerido para cargar documentos.');
 
-    const storageKey = `documentos/comparecientes/${comparecienteId}/${Date.now()}_${fileName}`;
+    const fechaEmision = validateOptionalDate(params.fechaEmision, 'La fecha de emisión');
+    const fechaVencimiento = validateOptionalDate(params.fechaVencimiento, 'La fecha de vencimiento');
+    const safeFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-180) || 'documento';
+    const storageKey = `documentos/comparecientes/${comparecienteId}/${Date.now()}_${crypto.randomUUID()}_${safeFileName}`;
+    const { uploadFile, deleteFile } = await import('./supabase.service');
     await uploadFile(buffer, storageKey, mimeType);
 
-    return await this.prisma.$transaction(async (tx) => {
-      const docMaster = await tx.documento.create({
-        data: {
-          nombre_original: fileName,
-          nombre_interno: fileName,
-          tipo: categoria || 'IDENTIFICACION',
-          categoria: 'OTROS',
-          mime_type: mimeType,
-          size_bytes: buffer.length,
-          storage_key: storageKey,
-          estatus: 'VIGENTE',
-          subido_por_id: userId,
-          compareciente_id: comparecienteId
-        }
-      });
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const docMaster = await tx.documento.create({
+          data: {
+            nombre_original: fileName,
+            nombre_interno: storageKey,
+            tipo: categoria,
+            categoria: 'OTROS',
+            mime_type: mimeType,
+            size_bytes: buffer.length,
+            storage_key: storageKey,
+            fecha_emision: fechaEmision,
+            fecha_vigencia: fechaVencimiento,
+            observaciones: params.observaciones,
+            estatus: 'PENDIENTE',
+            subido_por_id: actor.id,
+            compareciente_id: comparecienteId,
+          },
+        });
 
-      const vinculo = await tx.comparecienteDocumento.create({
-        data: {
-          compareciente_id: comparecienteId,
-          documento_id: docMaster.id,
-          categoria: (categoria as any) || 'OTROS',
-          creado_por_id: userId
-        }
+        const vinculo = await tx.comparecienteDocumento.create({
+          data: {
+            compareciente_id: comparecienteId,
+            documento_id: docMaster.id,
+            categoria: categoria as TipoDocumentoCompareciente,
+            fecha_documento: fechaEmision,
+            fecha_vencimiento: fechaVencimiento,
+            observaciones: params.observaciones,
+            creado_por_id: actor.id,
+          },
+        });
+        return { docMaster, vinculo };
       });
-
-      return { docMaster, vinculo };
-    });
+    } catch (error) {
+      try {
+        await deleteFile(storageKey);
+      } catch (cleanupError) {
+        console.error('[COMPARECIENTE_DOCUMENT_STORAGE_CLEANUP_FAILED]', cleanupError);
+      }
+      throw error;
+    }
   }
 }

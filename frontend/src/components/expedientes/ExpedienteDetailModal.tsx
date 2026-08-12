@@ -524,7 +524,7 @@ export const ExpedienteDetailModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
           {/* TAB 5: FINANZAS */}
           {activeTab === 'finanzas' && (
-            <ExpedienteFinanzasTab expedienteId={exp.id} />
+            <ExpedienteFinanzasTab expedienteId={exp.id} actorUserId={exp.abogado_id || ''} />
           )}
 
           {/* TAB 5: ACTIVIDAD */}

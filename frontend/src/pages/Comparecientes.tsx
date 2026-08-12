@@ -10,24 +10,21 @@ import {
   AlertTriangle,
   CheckCircle2, 
   ChevronRight,
-  Trash2,
   X
 } from 'lucide-react';
 import { comparecientesService, calcularCalidadInformacion } from '../services/comparecientes.service';
 import { ModalNuevoCompareciente } from '../components/comparecientes/ModalNuevoCompareciente';
 
-// ─── Modal de confirmación para archivar/eliminar ──────────────────────────
+// ─── Modal de confirmación para archivar ────────────────────────────
 interface ModalArchivarProps {
   compareciente: any;
   onClose: () => void;
-  onConfirm: (modo: 'ARCHIVAR' | 'ELIMINAR', motivo: string) => Promise<void>;
+  onConfirm: (motivo: string) => Promise<void>;
   procesando: boolean;
 }
 
 function ModalArchivarCompareciente({ compareciente, onClose, onConfirm, procesando }: ModalArchivarProps) {
-  const [modo, setModo] = useState<'ARCHIVAR' | 'ELIMINAR'>('ARCHIVAR');
   const [motivo, setMotivo] = useState('');
-  const [confirmText, setConfirmText] = useState('');
 
   const isFisica = compareciente?.tipo_persona === 'FISICA';
   const pf = compareciente?.personaFisica || compareciente?.persona_fisica;
@@ -36,12 +33,8 @@ function ModalArchivarCompareciente({ compareciente, onClose, onConfirm, procesa
     ? (pf?.nombre_completo_calculado || compareciente?.nombre_busqueda)
     : (pm?.razon_social || compareciente?.nombre_busqueda);
 
-  const tieneExpedientes = (compareciente?.expedientes?.length || 0) > 0;
-  const puedeEliminar = !tieneExpedientes;
-
   const handleConfirm = async () => {
-    if (modo === 'ELIMINAR' && confirmText.trim().toUpperCase() !== 'ELIMINAR') return;
-    await onConfirm(modo, motivo || 'Retirado manualmente desde el catálogo');
+    await onConfirm(motivo || 'Archivado manualmente desde el catálogo');
   };
 
   return (
@@ -55,7 +48,7 @@ function ModalArchivarCompareciente({ compareciente, onClose, onConfirm, procesa
             </div>
             <div>
               <h3 className="font-bold text-slate-900 text-sm">Retirar Compareciente</h3>
-              <p className="text-xs text-slate-500">Archivar o eliminar del catálogo</p>
+              <p className="text-xs text-slate-500">Archivar de forma reversible</p>
             </div>
           </div>
           <button
@@ -71,78 +64,25 @@ function ModalArchivarCompareciente({ compareciente, onClose, onConfirm, procesa
           <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Compareciente</p>
             <p className="font-bold text-sm" style={{ color: '#090d16' }}>{nombreDisplay}</p>
-            {tieneExpedientes && (
-              <p className="text-xs text-amber-700 mt-1.5 flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                Tiene {compareciente.expedientes.length} expediente(s) vinculado(s). Solo se puede archivar.
-              </p>
-            )}
-          </div>
-
-          {/* Selector de modo */}
-          <div>
-            <p className="text-xs font-bold text-slate-700 mb-2">Acción</p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setModo('ARCHIVAR')}
-                className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold border transition-all ${
-                  modo === 'ARCHIVAR'
-                    ? 'bg-amber-50 border-amber-400 text-amber-800'
-                    : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                }`}
-              >
-                <Archive className="w-3.5 h-3.5 inline mr-1.5" />
-                Archivar
-              </button>
-              <button
-                type="button"
-                onClick={() => { if (puedeEliminar) setModo('ELIMINAR'); }}
-                disabled={!puedeEliminar}
-                className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold border transition-all ${
-                  modo === 'ELIMINAR'
-                    ? 'bg-rose-50 border-rose-400 text-rose-800'
-                    : 'bg-white border-slate-200 text-slate-500'
-                } ${!puedeEliminar ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:border-slate-300'}`}
-              >
-                <Trash2 className="w-3.5 h-3.5 inline mr-1.5" />
-                Eliminar
-              </button>
-            </div>
-            {!puedeEliminar && (
-              <p className="text-[11px] text-slate-400 mt-1">Eliminación no disponible: tiene expedientes vinculados.</p>
-            )}
+            <p className="text-xs text-amber-700 mt-1.5 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              El registro y sus relaciones se conservarán para trazabilidad.
+            </p>
           </div>
 
           {/* Motivo */}
           <div>
             <label className="text-xs font-bold text-slate-700 block mb-1.5">
-              Motivo {modo === 'ARCHIVAR' ? '(opcional)' : '(requerido)'}
+              Motivo (opcional)
             </label>
             <textarea
               value={motivo}
               onChange={e => setMotivo(e.target.value)}
               rows={2}
-              placeholder={modo === 'ARCHIVAR' ? 'Ej. Registro de prueba sin relaciones...' : 'Especifica el motivo...'}
+              placeholder="Ej. Registro duplicado o fuera de operación..."
               className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-amber-400 outline-none resize-none"
             />
           </div>
-
-          {/* Confirmación de texto para eliminar */}
-          {modo === 'ELIMINAR' && (
-            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200">
-              <p className="text-xs font-bold text-rose-800 mb-1.5">
-                Acción irreversible. Escribe <span className="font-black">ELIMINAR</span> para confirmar:
-              </p>
-              <input
-                type="text"
-                value={confirmText}
-                onChange={e => setConfirmText(e.target.value)}
-                placeholder="ELIMINAR"
-                className="w-full text-xs px-3 py-2 rounded-lg border border-rose-200 bg-white text-rose-900 focus:ring-2 focus:ring-rose-400 outline-none font-mono"
-              />
-            </div>
-          )}
         </div>
 
         {/* Footer */}
@@ -158,14 +98,10 @@ function ModalArchivarCompareciente({ compareciente, onClose, onConfirm, procesa
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={procesando || (modo === 'ELIMINAR' && confirmText.trim().toUpperCase() !== 'ELIMINAR')}
-            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
-              modo === 'ARCHIVAR'
-                ? 'bg-amber-500 hover:bg-amber-600 text-white'
-                : 'bg-rose-600 hover:bg-rose-700 text-white'
-            }`}
+            disabled={procesando}
+            className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 bg-amber-500 hover:bg-amber-600 text-white"
           >
-            {procesando ? 'Procesando...' : modo === 'ARCHIVAR' ? 'Archivar' : 'Eliminar definitivamente'}
+            {procesando ? 'Procesando...' : 'Archivar'}
           </button>
         </div>
       </div>
@@ -215,17 +151,15 @@ export default function Comparecientes() {
     }
   };
 
-  const handleArchivar = async (modo: 'ARCHIVAR' | 'ELIMINAR', motivo: string) => {
+  const handleArchivar = async (motivo: string) => {
     if (!modalArchivar) return;
     setProcesandoArchivar(true);
     try {
-      await comparecientesService.archivarCompareciente(modalArchivar.id, { modo, motivo });
+      await comparecientesService.archivarCompareciente(modalArchivar.id, { motivo });
       setModalArchivar(null);
       setFeedbackMsg({
         tipo: 'success',
-        texto: modo === 'ARCHIVAR'
-          ? 'Compareciente archivado correctamente.'
-          : 'Compareciente eliminado definitivamente.'
+        texto: 'Compareciente archivado correctamente.'
       });
       await fetchData();
       setTimeout(() => setFeedbackMsg(null), 5000);
@@ -477,7 +411,7 @@ export default function Comparecientes() {
                         setModalArchivar(c);
                       }}
                       className="flex items-center gap-1 text-[11px] font-semibold text-slate-400 hover:text-amber-600 transition-colors px-1.5 py-1 rounded-lg hover:bg-amber-50 cursor-pointer"
-                      title="Archivar o eliminar"
+                      title="Archivar de forma reversible"
                     >
                       <Archive className="w-3.5 h-3.5" />
                       Archivar

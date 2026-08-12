@@ -27,17 +27,27 @@ import {
   RefreshCw,
   Folder
 } from 'lucide-react';
-import { comparecientesService, calcularCalidadInformacion } from '../services/comparecientes.service';
+import { comparecientesService } from '../services/comparecientes.service';
+
+const DOCUMENT_CATEGORY_BY_FOLDER: Record<string, string> = {
+  'Identificación': 'IDENTIFICACION',
+  'Identificaciones': 'IDENTIFICACION',
+  'Fiscal': 'CONSTANCIA_FISCAL',
+  'Domicilio': 'COMPROBANTE_DOMICILIO',
+  'Estado Civil': 'REGIMEN_MATRIMONIAL',
+  'Migratorio': 'DOCUMENTO_MIGRATORIO',
+  'Poderes': 'PODERES',
+  'Constitución': 'ACTA_CONSTITUTIVA',
+  'Representación': 'PODERES',
+  'Registro Mercantil': 'INSCRIPCION_MERCANTIL',
+  'Otros': 'OTROS',
+};
 
 export default function ComparecienteDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get('tab') as any;
-
-  // Navigation Context from Origin Expediente
-  const originExpedienteId = searchParams.get('fromExpediente');
-  const originExpedienteFolio = searchParams.get('folio') || '0005-2026';
 
   const [compareciente, setCompareciente] = useState<any>(null);
   const [archivoDocs, setArchivoDocs] = useState<any[]>([]);
@@ -53,6 +63,7 @@ export default function ComparecienteDetail() {
 
   const [docVisorSeleccionado, setDocVisorSeleccionado] = useState<any | null>(null);
   const [subiendoNuevoDoc, setSubiendoNuevoDoc] = useState(false);
+  const [docUploadError, setDocUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (id === 'nuevo') {
@@ -74,7 +85,7 @@ export default function ComparecienteDetail() {
     setError(null);
     try {
       const res = await comparecientesService.obtenerPorId(compMasterId);
-      setCompareciente(res);
+      setCompareciente(res?.data || res);
     } catch (err: any) {
       console.error(err);
       setError('No se pudo cargar la Ficha Maestra del Compareciente');
@@ -101,10 +112,11 @@ export default function ComparecienteDetail() {
     const file = e.target.files[0];
 
     setSubiendoNuevoDoc(true);
+    setDocUploadError(null);
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('categoria', carpetaSeleccionada === 'TODAS' ? 'OTROS' : carpetaSeleccionada.toUpperCase());
+      formData.append('categoria', carpetaSeleccionada === 'TODAS' ? 'OTROS' : (DOCUMENT_CATEGORY_BY_FOLDER[carpetaSeleccionada] || 'OTROS'));
 
       const res = await fetch(`/api/comparecientes/${id}/documentos`, {
         method: 'POST',
@@ -113,10 +125,12 @@ export default function ComparecienteDetail() {
 
       const data = await res.json();
       if (data.success) {
-        fetchDocumentos(id);
+        await fetchDocumentos(id);
+      } else {
+        throw new Error(data.error || 'No fue posible cargar el documento.');
       }
-    } catch (err) {
-      console.error('Error subiendo documento a la ficha:', err);
+    } catch (err: any) {
+      setDocUploadError(err.message || 'No fue posible cargar el documento.');
     } finally {
       setSubiendoNuevoDoc(false);
       e.target.value = '';
@@ -257,6 +271,42 @@ export default function ComparecienteDetail() {
                   <p className="text-[11px] font-medium text-slate-400">PEP (Persona Políticamente Expuesta)</p>
                   <p className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">{pf?.pep_estado || (pf?.pep ? 'SI' : 'NO')}</p>
                 </div>
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40">
+                  <p className="text-[11px] font-medium text-slate-400">Nacimiento</p>
+                  <p className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">
+                    {[pf?.lugar_nacimiento, pf?.pais_nacimiento].filter(Boolean).join(', ') || 'No registrado'}
+                  </p>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40">
+                  <p className="text-[11px] font-medium text-slate-400">Nacionalidad / calidad migratoria</p>
+                  <p className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">
+                    {[pf?.nacionalidad, pf?.calidad_migratoria].filter(Boolean).join(' · ') || 'No registrado'}
+                  </p>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40">
+                  <p className="text-[11px] font-medium text-slate-400">Ocupación / escolaridad</p>
+                  <p className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">
+                    {[pf?.ocupacion, pf?.escolaridad].filter(Boolean).join(' · ') || 'No registrado'}
+                  </p>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40">
+                  <p className="text-[11px] font-medium text-slate-400">Actividad económica / giro</p>
+                  <p className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">
+                    {[pf?.actividad_economica, pf?.giro].filter(Boolean).join(' · ') || 'No registrado'}
+                  </p>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 md:col-span-2">
+                  <p className="text-[11px] font-medium text-slate-400">Alias</p>
+                  <p className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">
+                    {compareciente.aliases?.map((item: any) => item.alias).join(', ') || 'Sin alias registrados'}
+                  </p>
+                </div>
+                {pf?.pep_estado === 'SI' && (
+                  <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-500/20">
+                    <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400">Relación PEP</p>
+                    <p className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">{pf?.relacion_pep || 'Pendiente de documentar'}</p>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -270,6 +320,46 @@ export default function ComparecienteDetail() {
                 </div>
               </div>
             )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-2">
+              <section className="rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+                <h4 className="text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-2"><MapPin className="w-4 h-4 text-amber-400" /> Domicilios</h4>
+                <div className="mt-3 space-y-3">
+                  {compareciente.domicilios?.length ? compareciente.domicilios.map((domicilio: any) => (
+                    <div key={domicilio.id} className="text-xs text-slate-500 dark:text-slate-400">
+                      <span className="font-bold text-slate-700 dark:text-slate-200">{domicilio.tipo}{domicilio.principal ? ' · Principal' : ''}</span>
+                      <p>{[domicilio.calle, domicilio.exterior, domicilio.colonia, domicilio.municipio, domicilio.estado, domicilio.codigo_postal].filter(Boolean).join(', ') || 'Dirección incompleta'}</p>
+                      <p>{domicilio.comprobado ? 'Comprobado documentalmente' : 'Sin comprobación documental'}</p>
+                    </div>
+                  )) : <p className="text-xs text-slate-500">Sin domicilios registrados.</p>}
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+                <h4 className="text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-2"><CreditCard className="w-4 h-4 text-amber-400" /> Identificaciones</h4>
+                <div className="mt-3 space-y-3">
+                  {compareciente.identificaciones?.length ? compareciente.identificaciones.map((identificacion: any) => (
+                    <div key={identificacion.id} className="text-xs text-slate-500 dark:text-slate-400">
+                      <span className="font-bold text-slate-700 dark:text-slate-200">{identificacion.tipo_identificacion}{identificacion.principal ? ' · Principal' : ''}</span>
+                      <p>{identificacion.numero || 'Sin folio'} · {identificacion.estatus}</p>
+                      <p>{identificacion.autoridad_emisora || 'Autoridad no registrada'}</p>
+                    </div>
+                  )) : <p className="text-xs text-slate-500">Sin identificaciones registradas.</p>}
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+                <h4 className="text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-2"><Phone className="w-4 h-4 text-amber-400" /> Contactos</h4>
+                <div className="mt-3 space-y-3">
+                  {compareciente.contactos?.length ? compareciente.contactos.map((contacto: any) => (
+                    <div key={contacto.id} className="text-xs text-slate-500 dark:text-slate-400">
+                      <span className="font-bold text-slate-700 dark:text-slate-200">{contacto.tipo}{contacto.principal ? ' · Principal' : ''}</span>
+                      <p>{contacto.valor}</p>
+                    </div>
+                  )) : <p className="text-xs text-slate-500">Sin contactos registrados.</p>}
+                </div>
+              </section>
+            </div>
           </div>
         )}
 
@@ -291,7 +381,7 @@ export default function ComparecienteDetail() {
                 <input
                   type="file"
                   id="uploadMasterInput"
-                  accept=".pdf,.png,.jpg,.jpeg"
+                  accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
                   onChange={handleUploadNuevoDoc}
                   className="hidden"
                 />
@@ -308,6 +398,12 @@ export default function ComparecienteDetail() {
                 </label>
               </div>
             </div>
+
+            {docUploadError && (
+              <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
+                {docUploadError}
+              </div>
+            )}
 
             {/* Filtros por Carpetas Sugeridas */}
             <div className="flex items-center gap-2 overflow-x-auto pb-2">
@@ -412,10 +508,10 @@ export default function ComparecienteDetail() {
                   <div key={idx} className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
                     <div>
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-                        {vinculo.caracter?.nombre || 'PARTE COMPRADORA'}
+                        {vinculo.caracter?.nombre || 'Carácter no especificado'}
                       </span>
                       <h4 className="text-sm font-bold text-slate-900 dark:text-white mt-1">
-                        Folio: {vinculo.expediente?.numero_pravia || '0005-2026'}
+                        Folio: {vinculo.expediente?.numero_pravia || 'Sin folio'}
                       </h4>
                     </div>
 

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { ComparecienteAltaSessionController } from '../controllers/comparecienteAltaSession.controller';
+import { requirePermission } from '../middleware/auth.middleware';
 
 const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024 } // 25 MB max limit
@@ -85,27 +86,33 @@ router.put(
 // 3. EXTRACCIÓN MEDIANTE IA
 router.post(
   '/:sessionId/extraer-ia',
+  requirePermission('ia.execute'),
   ComparecienteAltaSessionController.extraerIA
 );
 router.post(
   '/altas/:sessionId/extraer-ia',
+  requirePermission('ia.execute'),
   ComparecienteAltaSessionController.extraerIA
 );
 router.post(
   '/session/:sessionId/extraer-ia',
+  requirePermission('ia.execute'),
   ComparecienteAltaSessionController.extraerIA
 );
 
 router.post(
   '/:sessionId/extraer',
+  requirePermission('ia.execute'),
   ComparecienteAltaSessionController.extraerIA
 );
 router.post(
   '/altas/:sessionId/extraer',
+  requirePermission('ia.execute'),
   ComparecienteAltaSessionController.extraerIA
 );
 router.post(
   '/session/:sessionId/extraer',
+  requirePermission('ia.execute'),
   ComparecienteAltaSessionController.extraerIA
 );
 

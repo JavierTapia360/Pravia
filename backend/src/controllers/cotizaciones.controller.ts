@@ -1,7 +1,16 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
-import { CotizacionEstado } from '@prisma/client';
+import { CotizacionEstado, Prisma } from '@prisma/client';
 import { logAudit } from '../utils/auditLogger';
+import {
+  CotizacionBusinessError,
+  evaluateConversionEligibility,
+  getAllowedCotizacionTransitions,
+  validateCotizacionTransition,
+} from '../domain/cotizacionWorkflow';
+import { CotizacionConversionService } from '../services/cotizacionConversion.service';
+
+const cotizacionConversionService = new CotizacionConversionService(prisma);
 
 export const getCotizaciones = async (req: Request, res: Response) => {
   try {
@@ -18,6 +27,10 @@ export const getCotizaciones = async (req: Request, res: Response) => {
         notaria: { select: { nombre: true } },
         creada_por: { select: { nombre: true } },
         versiones: { orderBy: { version: 'desc' } },
+        pagos: {
+          where: { categoria_ingreso: 'ANTICIPO_NOTARIA' },
+          select: { id: true, monto: true, estatus: true, categoria_ingreso: true, fecha_pago: true },
+        },
         expediente: true
       },
       orderBy: { created_at: 'desc' }
@@ -43,6 +56,7 @@ export const getCotizacionById = async (req: Request, res: Response) => {
         versiones: { orderBy: { version: 'desc' } },
         documentos: true,
         pagos: true,
+        expediente: true,
         creada_por: { select: { nombre: true } }
       }
     });
@@ -52,7 +66,9 @@ export const getCotizacionById = async (req: Request, res: Response) => {
       ...cotizacion,
       versiones: cotizacion.versiones || [],
       documentos: cotizacion.documentos || [],
-      pagos: cotizacion.pagos || []
+      pagos: cotizacion.pagos || [],
+      transiciones_permitidas: getAllowedCotizacionTransitions(cotizacion.estado),
+      conversion: evaluateConversionEligibility(cotizacion),
     };
     res.json(safeCotizacion);
   } catch (error: any) {
@@ -68,21 +84,11 @@ export const createCotizacion = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'prospecto_id es requerido' });
     }
 
-    const userId = user_id || (await prisma.user.findFirst())?.id;
+    const actor = user_id
+      ? await prisma.user.findFirst({ where: { id: user_id, activo: true } })
+      : await prisma.user.findFirst({ where: { activo: true }, orderBy: { created_at: 'asc' } });
+    const userId = actor?.id;
     if (!userId) return res.status(400).json({ error: 'Usuario no encontrado' });
-
-    // Generate consecutive number SOL-YYYY-NNN
-    const year = new Date().getFullYear();
-    const count = await prisma.cotizacion.count({
-      where: {
-        created_at: {
-          gte: new Date(`${year}-01-01T00:00:00.000Z`),
-          lt: new Date(`${year + 1}-01-01T00:00:00.000Z`)
-        }
-      }
-    });
-    const numero_solicitud = `SOL-${year}-${String(count + 1).padStart(3, '0')}`;
-    const numero_cotizacion = `COT-${year}-${String(count + 1).padStart(3, '0')}`;
 
     // Get prospecto info for email generation
     const prospecto = await prisma.prospecto.findUnique({
@@ -91,6 +97,18 @@ export const createCotizacion = async (req: Request, res: Response) => {
     });
 
     if (!prospecto) return res.status(404).json({ error: 'Prospecto no encontrado' });
+    const existing = await prisma.cotizacion.findUnique({ where: { prospecto_id } });
+    if (existing) {
+      return res.status(409).json({
+        error: 'Este prospecto ya tiene una cotización vinculada.',
+        code: 'PROSPECT_ALREADY_HAS_QUOTE',
+        existing_id: existing.id,
+      });
+    }
+    if (notaria_id) {
+      const validNotary = await prisma.notaria.findFirst({ where: { id: notaria_id, activa: true }, select: { id: true } });
+      if (!validNotary) return res.status(400).json({ error: 'La notaría seleccionada no existe.' });
+    }
 
     // Generate suggested email body
     const docsList = prospecto.documentos.map(d => `- ${d.tipo || 'Documento'} (${d.nombre_original})`).join('\n') || '- No hay documentos cargados';
@@ -111,19 +129,42 @@ Quedamos atentos.
 
 PRAVIA`;
 
-    const cotizacion = await prisma.cotizacion.create({
-      data: {
-        numero_solicitud,
-        numero_cotizacion,
-        prospecto_id,
-        user_id: userId,
-        notaria_id,
-        estado: CotizacionEstado.BORRADOR,
-        cuerpo_correo_notaria
-      }
+    const year = new Date().getFullYear();
+    const cotizacion = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion-folio:${year}`}))`);
+      const yearlyFolios = await tx.cotizacion.findMany({
+        where: {
+          created_at: {
+            gte: new Date(`${year}-01-01T00:00:00.000Z`),
+            lt: new Date(`${year + 1}-01-01T00:00:00.000Z`),
+          },
+        },
+        select: { numero_solicitud: true },
+      });
+      const nextSequence = yearlyFolios.reduce((highest, quote) => {
+        const match = quote.numero_solicitud?.match(new RegExp(`^SOL-${year}-(\\d+)$`));
+        return Math.max(highest, match ? Number(match[1]) : 0);
+      }, 0) + 1;
+      const sequence = String(nextSequence).padStart(3, '0');
+      const created = await tx.cotizacion.create({
+        data: {
+          numero_solicitud: `SOL-${year}-${sequence}`,
+          numero_cotizacion: `COT-${year}-${sequence}`,
+          prospecto_id,
+          user_id: userId,
+          notaria_id,
+          estado: CotizacionEstado.BORRADOR,
+          cuerpo_correo_notaria,
+        },
+      });
+      await tx.prospecto.update({
+        where: { id: prospecto_id },
+        data: { estado: 'COTIZACION_SOLICITADA' },
+      });
+      return created;
     });
 
-    await logAudit(userId, 'CREATE', 'Cotizacion', cotizacion.id, { numero_solicitud });
+    await logAudit(userId, 'CREATE', 'Cotizacion', cotizacion.id, { numero_solicitud: cotizacion.numero_solicitud });
 
     res.status(201).json({
       ...cotizacion,
@@ -132,6 +173,12 @@ PRAVIA`;
       pagos: []
     });
   } catch (error: any) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return res.status(409).json({
+        error: 'La cotización ya existe o el folio fue reservado por otra operación. Recarga la lista para continuar.',
+        code: 'DUPLICATE_QUOTE',
+      });
+    }
     res.status(500).json({ error: 'Error al crear cotización', detail: error.message });
   }
 };
@@ -141,33 +188,60 @@ export const updateCotizacionEstado = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { estado, user_id } = req.body;
 
-    const dataToUpdate: any = { estado };
-
-    if (estado === CotizacionEstado.ENVIADA_NOTARIA) {
-      dataToUpdate.fecha_solicitud_notaria = new Date();
-      const limit = new Date();
-      limit.setDate(limit.getDate() + 5);
-      dataToUpdate.fecha_limite_respuesta_notaria = limit;
-    } else if (estado === CotizacionEstado.PRESUPUESTO_RECIBIDO || estado === CotizacionEstado.EN_REVISION_ABOGADO) {
-      dataToUpdate.fecha_presupuesto_recibido = new Date();
-    } else if (estado === CotizacionEstado.ENVIADA_CLIENTE || estado === CotizacionEstado.EN_NEGOCIACION) {
-      dataToUpdate.fecha_enviada_cliente = new Date();
-    } else if (estado === CotizacionEstado.ACEPTADA) {
-      dataToUpdate.fecha_aceptacion_cliente = new Date();
-    } else if (estado === CotizacionEstado.CONVERTIDA_EXPEDIENTE) {
-      dataToUpdate.fecha_conversion_expediente = new Date();
+    if (!Object.values(CotizacionEstado).includes(estado as CotizacionEstado)) {
+      return res.status(400).json({ error: 'Estado de cotización inválido.', code: 'INVALID_COTIZACION_STATE' });
     }
 
-    const cotizacion = await prisma.cotizacion.update({
-      where: { id },
-      data: dataToUpdate
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion-state:${id}`}))`);
+      const current = await tx.cotizacion.findUnique({
+        where: { id },
+        include: { versiones: { select: { aprobada: true } } },
+      });
+      if (!current) {
+        throw new CotizacionBusinessError('Cotización no encontrada.', 'COTIZACION_NOT_FOUND', 404);
+      }
+
+      validateCotizacionTransition({
+        current: current.estado,
+        next: estado as CotizacionEstado,
+        hasNotaria: Boolean(current.notaria_id),
+        hasApprovedVersion: current.versiones.some((version) => version.aprobada),
+      });
+
+      if (current.estado === estado) return { cotizacion: current, changed: false };
+
+      const dataToUpdate: any = { estado };
+      if (estado === CotizacionEstado.ENVIADA_NOTARIA) {
+        dataToUpdate.fecha_solicitud_notaria = new Date();
+        const limit = new Date();
+        limit.setDate(limit.getDate() + 5);
+        dataToUpdate.fecha_limite_respuesta_notaria = limit;
+      } else if (estado === CotizacionEstado.PRESUPUESTO_RECIBIDO || estado === CotizacionEstado.EN_REVISION_ABOGADO) {
+        dataToUpdate.fecha_presupuesto_recibido = new Date();
+      } else if (estado === CotizacionEstado.ENVIADA_CLIENTE || estado === CotizacionEstado.EN_NEGOCIACION) {
+        dataToUpdate.fecha_enviada_cliente = new Date();
+      } else if (estado === CotizacionEstado.ACEPTADA) {
+        dataToUpdate.fecha_aceptacion_cliente = new Date();
+      }
+
+      const cotizacion = await tx.cotizacion.update({ where: { id }, data: dataToUpdate });
+      return { cotizacion, changed: true };
     });
 
-    const userId = user_id || cotizacion.user_id;
-    await logAudit(userId, 'UPDATE_ESTADO', 'Cotizacion', id, { nuevo_estado: estado });
+    if (result.changed) {
+      const userId = user_id || result.cotizacion.user_id;
+      await logAudit(userId, 'UPDATE_ESTADO', 'Cotizacion', id, { nuevo_estado: estado });
+    }
 
-    res.json(cotizacion);
+    res.json({
+      ...result.cotizacion,
+      transiciones_permitidas: getAllowedCotizacionTransitions(result.cotizacion.estado),
+    });
   } catch (error: any) {
+    if (error instanceof CotizacionBusinessError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
     res.status(500).json({ error: 'Error al actualizar estado', detail: error.message });
   }
 };
@@ -180,28 +254,48 @@ export const createCotizacionVersion = async (req: Request, res: Response) => {
       desglose_pravia,
       total_notaria,
       honorarios_pravia,
-      pravia_modalidad,
-      pravia_porcentaje,
-      notaria_neto,
       user_id,
       notas,
       aprobada
     } = req.body;
 
-    const cotizacion = await prisma.cotizacion.findUnique({ where: { id } });
-    if (!cotizacion) return res.status(404).json({ error: 'Cotización no encontrada' });
-
-    const newVersionNum = cotizacion.version_actual + 1;
-    const userId = user_id || cotizacion.user_id;
-
     // Total cliente equals total notaria (PRAVIA participation is an internal split, NOT an additive fee)
     const totalNotariaVal = Number(total_notaria || 0);
     const totalClienteVal = totalNotariaVal;
     const honorariosPraviaVal = Number(honorarios_pravia || 0);
-    const notariaNetoVal = Number(notaria_neto || (totalNotariaVal - honorariosPraviaVal));
+    if (!Number.isFinite(totalNotariaVal) || totalNotariaVal <= 0) {
+      return res.status(400).json({ error: 'El total notarial debe ser mayor que cero.', code: 'INVALID_QUOTE_TOTAL' });
+    }
+    if (!Number.isFinite(honorariosPraviaVal) || honorariosPraviaVal < 0 || honorariosPraviaVal > totalNotariaVal) {
+      return res.status(400).json({
+        error: 'Los honorarios PRAVIA deben estar entre cero y el total notarial.',
+        code: 'INVALID_PRAVIA_FEE',
+      });
+    }
 
-    const [version, updatedCotizacion] = await prisma.$transaction([
-      prisma.cotizacionVersion.create({
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion-version:${id}`}))`);
+      const cotizacion = await tx.cotizacion.findUnique({ where: { id } });
+      if (!cotizacion) {
+        throw new CotizacionBusinessError('Cotización no encontrada.', 'COTIZACION_NOT_FOUND', 404);
+      }
+
+      const latestVersion = await tx.cotizacionVersion.findFirst({
+        where: { cotizacion_id: id },
+        orderBy: { version: 'desc' },
+        select: { version: true },
+      });
+      const newVersionNum = latestVersion ? latestVersion.version + 1 : 1;
+      const userId = user_id || cotizacion.user_id;
+
+      if (aprobada) {
+        await tx.cotizacionVersion.updateMany({
+          where: { cotizacion_id: id, aprobada: true },
+          data: { aprobada: false },
+        });
+      }
+
+      const version = await tx.cotizacionVersion.create({
         data: {
           cotizacion_id: id,
           version: newVersionNum,
@@ -214,8 +308,8 @@ export const createCotizacionVersion = async (req: Request, res: Response) => {
           aprobada: aprobada ?? false,
           notas
         }
-      }),
-      prisma.cotizacion.update({
+      });
+      const updatedCotizacion = await tx.cotizacion.update({
         where: { id },
         data: {
           version_actual: newVersionNum,
@@ -233,13 +327,26 @@ Saludos cordiales,
 Equipo PRAVIA OS`,
           ...(aprobada ? { fecha_aprobacion_version: new Date() } : {})
         }
-      })
-    ]);
+      });
+      return { version, updatedCotizacion, userId, newVersionNum };
+    });
 
-    await logAudit(userId, 'CREATE_VERSION', 'Cotizacion', id, { version: newVersionNum });
+    await logAudit(result.userId, 'CREATE_VERSION', 'Cotizacion', id, {
+      version: result.newVersionNum,
+      aprobada: Boolean(aprobada),
+    });
 
-    res.status(201).json({ version, cotizacion: updatedCotizacion });
+    res.status(201).json({ version: result.version, cotizacion: result.updatedCotizacion });
   } catch (error: any) {
+    if (error instanceof CotizacionBusinessError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return res.status(409).json({
+        error: 'Otra operación creó esta versión al mismo tiempo. Recarga la cotización para continuar.',
+        code: 'QUOTE_VERSION_CONFLICT',
+      });
+    }
     res.status(500).json({ error: 'Error al crear versión', detail: error.message });
   }
 };
@@ -249,23 +356,45 @@ export const aprobarVersion = async (req: Request, res: Response) => {
     const { versionId } = req.params;
     const { user_id } = req.body;
 
-    const version = await prisma.cotizacionVersion.update({
-      where: { id: versionId },
-      data: { aprobada: true }
+    const target = await prisma.cotizacionVersion.findUnique({ where: { id: versionId } });
+    if (!target) return res.status(404).json({ error: 'Versión de cotización no encontrada.' });
+
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:cotizacion-version:${target.cotizacion_id}`}))`);
+      const version = await tx.cotizacionVersion.findUnique({ where: { id: versionId } });
+      if (!version) {
+        throw new CotizacionBusinessError('Versión de cotización no encontrada.', 'QUOTE_VERSION_NOT_FOUND', 404);
+      }
+
+      await tx.cotizacionVersion.updateMany({
+        where: { cotizacion_id: version.cotizacion_id, aprobada: true, NOT: { id: version.id } },
+        data: { aprobada: false },
+      });
+      const approvedVersion = await tx.cotizacionVersion.update({
+        where: { id: version.id },
+        data: { aprobada: true },
+      });
+      const cotizacion = await tx.cotizacion.update({
+        where: { id: version.cotizacion_id },
+        data: {
+          version_actual: version.version,
+          total_notaria: version.total_notaria,
+          honorarios_pravia: version.honorarios_pravia,
+          total_cliente: version.total_cliente,
+          fecha_aprobacion_version: new Date(),
+        },
+      });
+      return { version: approvedVersion, cotizacion };
     });
 
-    await prisma.cotizacion.update({
-      where: { id: version.cotizacion_id },
-      data: { fecha_aprobacion_version: new Date() }
-    });
+    const userId = user_id || result.version.creada_por_id || result.cotizacion.user_id;
+    await logAudit(userId, 'APPROVE_VERSION', 'CotizacionVersion', versionId, { version: result.version.version });
 
-    const userId = user_id || version.creada_por_id || (await prisma.user.findFirst())?.id;
-    if (userId) {
-      await logAudit(userId, 'APPROVE_VERSION', 'CotizacionVersion', versionId, { version: version.version });
-    }
-
-    res.json(version);
+    res.json(result.version);
   } catch (error: any) {
+    if (error instanceof CotizacionBusinessError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
     res.status(500).json({ error: 'Error al aprobar versión', detail: error.message });
   }
 };
@@ -327,12 +456,24 @@ export const registrarAnticipo = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'El monto del anticipo debe ser mayor a 0.' });
     }
 
+    const cotizacion = await prisma.cotizacion.findUnique({ where: { id }, include: { expediente: true } });
+    if (!cotizacion) return res.status(404).json({ error: 'Cotización no encontrada.' });
+    if (cotizacion.expediente || cotizacion.estado === CotizacionEstado.CONVERTIDA_EXPEDIENTE) {
+      return res.status(409).json({ error: 'La cotización ya fue convertida; registra nuevos pagos desde el expediente.' });
+    }
+    if (cotizacion.estado !== CotizacionEstado.ACEPTADA) {
+      return res.status(400).json({
+        error: 'El anticipo sólo puede registrarse después de que el cliente acepte la cotización.',
+        code: 'QUOTE_MUST_BE_ACCEPTED',
+      });
+    }
+
     const pago = await prisma.pago.create({
       data: {
         cotizacion_id: id,
         categoria_ingreso: 'ANTICIPO_NOTARIA',
         concepto: 'Anticipo de cliente para trámite notarial',
-        monto,
+        monto: Number(monto),
         fecha_pago: fecha ? new Date(fecha) : new Date(),
         estatus: 'RECIBIDO',
         comprobante_url,
@@ -356,7 +497,30 @@ export const validarAnticipo = async (req: Request, res: Response) => {
     const { pagoId } = req.params;
     const { user_id } = req.body;
 
-    const userId = user_id || (await prisma.user.findFirst())?.id;
+    const pagoActual = await prisma.pago.findUnique({ where: { id: pagoId } });
+    if (!pagoActual || !pagoActual.cotizacion_id || pagoActual.categoria_ingreso !== 'ANTICIPO_NOTARIA') {
+      return res.status(404).json({ error: 'Anticipo de cotización no encontrado.' });
+    }
+    if (pagoActual.estatus === 'VALIDADO') return res.json(pagoActual);
+    if (!['PENDIENTE', 'RECIBIDO'].includes(pagoActual.estatus)) {
+      return res.status(409).json({ error: `No se puede validar un anticipo en estado ${pagoActual.estatus}.` });
+    }
+
+    const validator = user_id
+      ? await prisma.user.findFirst({
+          where: { id: user_id, activo: true, rol: { in: ['DIRECCION', 'ADMINISTRACION'] } },
+        })
+      : await prisma.user.findFirst({
+          where: { activo: true, rol: { in: ['DIRECCION', 'ADMINISTRACION'] } },
+          orderBy: { created_at: 'asc' },
+        });
+    if (!validator) {
+      return res.status(403).json({
+        error: 'La validación del anticipo requiere un usuario activo de Dirección o Administración.',
+        code: 'ADVANCE_VALIDATION_FORBIDDEN',
+      });
+    }
+    const userId = validator.id;
 
     const pago = await prisma.pago.update({
       where: { id: pagoId },
@@ -380,123 +544,25 @@ export const validarAnticipo = async (req: Request, res: Response) => {
 export const convertToExpediente = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { user_id, tipo_acto_id } = req.body;
-
-    const cotizacion = await prisma.cotizacion.findUnique({
-      where: { id },
-      include: {
-        prospecto: true,
-        versiones: true,
-        pagos: true
-      }
+    const { user_id, tipo_acto_id, abogado_id } = req.body;
+    const result = await cotizacionConversionService.convert({
+      cotizacionId: id,
+      actorUserId: (req as any).user?.id || user_id,
+      tipoActoId: tipo_acto_id,
+      abogadoId: abogado_id,
+      correlationId: (req as any).correlationId,
     });
-
-    if (!cotizacion) {
-      return res.status(404).json({ error: 'Cotización no encontrada' });
-    }
-
-    // ── ACCUMULATIVE MANDATORY VALIDATIONS ──
-    if (cotizacion.estado === CotizacionEstado.CONVERTIDA_EXPEDIENTE) {
-      return res.status(400).json({ 
-        error: 'No se puede convertir', 
-        detail: 'La cotización ya fue convertida previamente a un expediente.' 
-      });
-    }
-
-    if (cotizacion.estado !== CotizacionEstado.ACEPTADA) {
-      return res.status(400).json({ 
-        error: 'No se puede convertir', 
-        detail: 'La cotización debe estar en estado ACEPTADA por el cliente.' 
-      });
-    }
-
-    const hasApprovedVersion = cotizacion.versiones.some(v => v.aprobada === true);
-    if (!hasApprovedVersion) {
-      return res.status(400).json({ 
-        error: 'No se puede convertir', 
-        detail: 'Falta aprobar una versión del presupuesto (debe marcarse como aprobada).' 
-      });
-    }
-
-    if (!cotizacion.prospecto_id || !cotizacion.prospecto) {
-      return res.status(400).json({ 
-        error: 'No se puede convertir', 
-        detail: 'La cotización no tiene un prospecto válido vinculado.' 
-      });
-    }
-
-    // Generate EXP number
-    const year = new Date().getFullYear();
-    const count = await prisma.expediente.count({
-      where: {
-        fecha_apertura: {
-          gte: new Date(`${year}-01-01T00:00:00.000Z`),
-          lt: new Date(`${year + 1}-01-01T00:00:00.000Z`)
-        }
-      }
+    res.status(result.alreadyConverted ? 200 : 201).json({
+      ...result.expediente,
+      idempotent: result.alreadyConverted,
+      correlation_id: result.correlationId,
+      anticipo_validado: result.validatedAdvanceTotal,
     });
-    const numero_pravia = `EXP-${year}-${String(count + 1).padStart(3, '0')}`;
-    const userId = user_id || cotizacion.user_id;
-
-    // Transaction to create Expediente, update Documentos, Pagos and Prospecto
-    const result = await prisma.$transaction(async (tx) => {
-      let tipoActo = await tx.tipoActo.findFirst();
-      if (!tipoActo) {
-        tipoActo = await tx.tipoActo.create({
-          data: { nombre: 'General / No Especificado' }
-        });
-      }
-      const targetTipoActoId = tipo_acto_id || tipoActo.id;
-
-      // 1. Create Expediente
-      const expediente = await tx.expediente.create({
-        data: {
-          numero_pravia,
-          tipo_acto_id: targetTipoActoId,
-          abogado_id: cotizacion.user_id,
-          creador_id: userId,
-          cotizacion_id: cotizacion.id,
-          cliente_alias: cotizacion.prospecto?.nombre || 'Cliente',
-        }
-      });
-
-      // 2. Link all documents from prospecto and cotizacion to this expediente without cloning files
-      await tx.documento.updateMany({
-        where: {
-          OR: [
-            { prospecto_id: cotizacion.prospecto_id },
-            { cotizacion_id: cotizacion.id }
-          ]
-        },
-        data: { expediente_id: expediente.id }
-      });
-
-      // 3. Link all pagos from cotizacion to this expediente
-      await tx.pago.updateMany({
-        where: { cotizacion_id: cotizacion.id },
-        data: { expediente_id: expediente.id }
-      });
-
-      // 4. Update Cotizacion and Prospecto states
-      await tx.cotizacion.update({
-        where: { id: cotizacion.id },
-        data: { estado: CotizacionEstado.CONVERTIDA_EXPEDIENTE }
-      });
-      if (cotizacion.prospecto_id) {
-        await tx.prospecto.update({
-          where: { id: cotizacion.prospecto_id },
-          data: { estado: 'ACEPTADO' }
-        });
-      }
-
-      return expediente;
-    });
-
-    await logAudit(userId, 'CONVERT_TO_EXPEDIENTE', 'Cotizacion', id, { expediente_id: result.id, numero_pravia });
-
-    res.status(201).json(result);
   } catch (error: any) {
-    res.status(500).json({ error: 'Error al convertir a expediente', detail: error.message });
+    if (error instanceof CotizacionBusinessError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
+    res.status(500).json({ error: 'Error al convertir a expediente', code: 'CONVERSION_FAILED' });
   }
 };
 
@@ -684,5 +750,3 @@ export const unlinkCotizacionDocumento = async (req: Request, res: Response) => 
     res.status(500).json({ error: 'Error al desvincular documento de cotización', detail: error.message });
   }
 };
-
-

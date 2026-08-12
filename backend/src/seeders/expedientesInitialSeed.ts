@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../config/prisma';
 
 export async function seedExpedientesConfig() {
   console.log('🌱 Inicializando seeders idempotentes para el Motor de Expedientes...');

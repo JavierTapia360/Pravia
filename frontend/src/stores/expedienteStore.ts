@@ -26,6 +26,7 @@ export interface ExpedienteItem {
   avance_financiero: number;
   avance_general: number;
   proxima_accion?: string;
+  fecha_limite_accion?: string;
   fecha_apertura: string;
   fecha_estimada_firma?: string;
   created_at: string;

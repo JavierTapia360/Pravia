@@ -171,8 +171,11 @@ export const comparecientesService = {
     return api.delete(`/comparecientes/vincular-expediente/${vinculoId}`, { creado_por_id });
   },
 
-  archivarCompareciente: async (id: string, params: { modo?: 'ARCHIVAR' | 'ELIMINAR'; motivo?: string }) => {
+  validarVinculoExpediente: async (vinculoId: string, datos_validados: boolean) => {
+    return api.patch(`/comparecientes/vincular-expediente/${vinculoId}/validacion`, { datos_validados });
+  },
+
+  archivarCompareciente: async (id: string, params: { motivo?: string }) => {
     return api.patch(`/comparecientes/${id}/archivar`, params);
   }
 };
-

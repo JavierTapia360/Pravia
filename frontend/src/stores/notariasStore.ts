@@ -27,6 +27,7 @@ export interface Notaria {
   correo_general?: string;
   correo_proyectos?: string;
   pagina_web?: string;
+  contacto_principal?: string;
   horario?: string;
   dias_atencion?: string;
   tiempo_respuesta?: string;
@@ -34,6 +35,10 @@ export interface Notaria {
   tiempo_firma?: string;
   instrucciones_especiales?: string;
   observaciones_generales?: string;
+  requisitos_frecuentes?: string;
+  tipos_acto_json?: string[];
+  instituciones_json?: string[];
+  municipios_atendidos_json?: string[];
   activa: boolean;
   predeterminada: boolean;
   color_identificador?: string;
@@ -52,7 +57,7 @@ interface NotariasState {
   createNotaria: (data: Partial<Notaria>) => Promise<Notaria>;
   updateNotaria: (id: string, data: Partial<Notaria>) => Promise<Notaria>;
   setPredeterminada: (id: string) => Promise<void>;
-  deleteNotaria: (id: string) => Promise<void>;
+  archiveNotaria: (id: string) => Promise<void>;
 }
 
 export const useNotariasStore = create<NotariasState>((set, get) => ({
@@ -95,8 +100,8 @@ export const useNotariasStore = create<NotariasState>((set, get) => ({
     await get().fetchNotarias();
   },
 
-  deleteNotaria: async (id) => {
-    await api.delete(`/notarias/${id}`);
+  archiveNotaria: async (id) => {
+    await api.patch(`/notarias/${id}/archivar`, {});
     await get().fetchNotarias();
   }
 }));

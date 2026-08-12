@@ -6,7 +6,8 @@ import {
   Paperclip,
   FileText,
   FileCode,
-  Trash2,
+  Archive,
+  RotateCcw,
   Eye,
   Download,
   UploadCloud,
@@ -35,11 +36,13 @@ interface MovimientoItem {
 
 interface ExpedienteFinanzasTabProps {
   expedienteId: string;
+  actorUserId: string;
   onUpdate?: () => void;
 }
 
 export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
   expedienteId,
+  actorUserId,
   onUpdate
 }) => {
   const { addToast } = useToastStore();
@@ -50,7 +53,7 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
 
   // Modales
   const [showNuevoMovModal, setShowNuevoMovModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showReverseModal, setShowReverseModal] = useState(false);
   const [showAdjuntoModal, setShowAdjuntoModal] = useState(false);
   const [xmlViewerData, setXmlViewerData] = useState<{ title: string; text: string } | null>(null);
 
@@ -58,7 +61,7 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
   const [movForm, setMovForm] = useState({
     tipo_movimiento: 'ANTICIPO',
     naturaleza: 'INGRESO' as 'INGRESO' | 'EGRESO',
-    categoria: 'NOTARIA',
+    categoria: 'CLIENTE_FONDOS',
     concepto: '',
     monto: '',
     fecha_movimiento: new Date().toISOString().split('T')[0],
@@ -73,8 +76,9 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
   const [fileFacturaXml, setFileFacturaXml] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Eliminación State
+  // Reversión auditable
   const [selectedMovId, setSelectedMovId] = useState('');
+  const [reverseReason, setReverseReason] = useState('');
 
   // Cargar/Sustituir Adjunto Modal State
   const [selectedAdjuntoMovId, setSelectedAdjuntoMovId] = useState('');
@@ -114,26 +118,36 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
     presupuestoOperativo?.total_cliente ?? expData?.cotizacion?.total_cliente ?? expData?.valor_operacion ?? 0
   );
 
-  const totalCobrado = movimientos
-    .filter((m) => m.naturaleza === 'INGRESO' && ['VALIDADO', 'RECIBIDO'].includes(m.estatus))
+  const activeLedger = movimientos.filter(
+    (m) => ['VALIDADO', 'RECIBIDO'].includes(m.estatus) && m.categoria !== 'REVERSO'
+  );
+  const totalCobrado = activeLedger
+    .filter((m) => m.naturaleza === 'INGRESO')
     .reduce((sum, m) => sum + Number(m.monto), 0);
 
-  const devoluciones = movimientos
-    .filter((m) => m.tipo_movimiento === 'DEVOLUCION' && ['VALIDADO', 'RECIBIDO'].includes(m.estatus))
+  const devoluciones = activeLedger
+    .filter((m) => m.tipo_movimiento === 'DEVOLUCION' || m.categoria === 'DEVOLUCION')
     .reduce((sum, m) => sum + Number(m.monto), 0);
 
   const cobradoNeto = Math.max(0, totalCobrado - devoluciones);
   const saldoPendiente = Math.max(0, totalPresupuestado - cobradoNeto);
 
-  const totalEgresado = movimientos
-    .filter((m) => m.naturaleza === 'EGRESO' && ['VALIDADO', 'RECIBIDO'].includes(m.estatus))
+  const totalEgresado = activeLedger
+    .filter((m) => m.naturaleza === 'EGRESO')
     .reduce((sum, m) => sum + Number(m.monto), 0);
 
   const participacionPraviaTotal = Number(
     presupuestoOperativo?.honorarios_pravia ?? expData?.cotizacion?.honorarios_pravia ?? 0
   );
-  const proporcionCobrada = totalPresupuestado > 0 ? Math.min(1, cobradoNeto / totalPresupuestado) : 0;
-  const praviaCobradoEfectivo = Math.round(participacionPraviaTotal * proporcionCobrada * 100) / 100;
+  const praviaCobradoEfectivo = activeLedger
+    .filter((m) => m.naturaleza === 'INGRESO' && m.categoria === 'HONORARIOS_PRAVIA')
+    .reduce((sum, m) => sum + Number(m.monto), 0);
+  const tercerosPresupuestados = Math.max(0, totalPresupuestado - participacionPraviaTotal);
+  const egresosTerceros = activeLedger
+    .filter((m) => m.naturaleza === 'EGRESO' && ['NOTARIA', 'IMPUESTOS_DERECHOS', 'TERCEROS'].includes(m.categoria))
+    .reduce((sum, m) => sum + Number(m.monto), 0);
+  const saldoTerceros = Math.max(0, tercerosPresupuestados - egresosTerceros);
+  const fondosRetenidos = Math.max(0, cobradoNeto - praviaCobradoEfectivo - egresosTerceros);
 
   // Handler: Crear Movimiento Financiero
   const handleCreateMovimiento = async (e: React.FormEvent) => {
@@ -160,7 +174,7 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
         fecha_movimiento: movForm.fecha_movimiento,
         forma_pago: movForm.forma_pago,
         referencia: movForm.referencia,
-        estatus: movForm.estatus
+        user_id: actorUserId,
       };
 
       const newMov = await api.post(`/expedientes/${expedienteId}/movimientos`, payload);
@@ -174,6 +188,7 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
             const fd = new FormData();
             fd.append('file', fileComprobante);
             fd.append('tipo_adjunto', 'COMPROBANTE');
+            fd.append('user_id', actorUserId);
             await api.upload(`/expedientes/${expedienteId}/movimientos/${movId}/adjuntos/upload`, fd);
           } catch (err: any) {
             uploadErrors.push(`Comprobante: ${err.message || 'Error de subida'}`);
@@ -184,6 +199,7 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
             const fd = new FormData();
             fd.append('file', fileFacturaPdf);
             fd.append('tipo_adjunto', 'FACTURA_PDF');
+            fd.append('user_id', actorUserId);
             await api.upload(`/expedientes/${expedienteId}/movimientos/${movId}/adjuntos/upload`, fd);
           } catch (err: any) {
             uploadErrors.push(`Factura PDF: ${err.message || 'Error de subida'}`);
@@ -194,6 +210,7 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
             const fd = new FormData();
             fd.append('file', fileFacturaXml);
             fd.append('tipo_adjunto', 'FACTURA_XML');
+            fd.append('user_id', actorUserId);
             await api.upload(`/expedientes/${expedienteId}/movimientos/${movId}/adjuntos/upload`, fd);
           } catch (err: any) {
             uploadErrors.push(`Factura XML: ${err.message || 'Error de subida'}`);
@@ -211,7 +228,7 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
       setMovForm({
         tipo_movimiento: 'ANTICIPO',
         naturaleza: 'INGRESO',
-        categoria: 'NOTARIA',
+        categoria: 'CLIENTE_FONDOS',
         concepto: '',
         monto: '',
         fecha_movimiento: new Date().toISOString().split('T')[0],
@@ -248,6 +265,7 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
       const fd = new FormData();
       fd.append('file', newAdjuntoFile);
       fd.append('tipo_adjunto', tipoAdjuntoUpload);
+      fd.append('user_id', actorUserId);
 
       await api.upload(
         `/expedientes/${expedienteId}/movimientos/${selectedAdjuntoMovId}/adjuntos/upload`,
@@ -268,47 +286,47 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
     }
   };
 
-  // Handler: Eliminar Adjunto Específico
-  const handleDeleteAdjunto = async (movId: string, tipo: 'COMPROBANTE' | 'FACTURA_PDF' | 'FACTURA_XML') => {
-    if (!window.confirm(`¿Estás seguro de eliminar el archivo ${tipo}?`)) return;
+  // El vínculo deja de ser vigente, pero el archivo permanece en el historial.
+  const handleArchiveAdjunto = async (movId: string, tipo: 'COMPROBANTE' | 'FACTURA_PDF' | 'FACTURA_XML') => {
+    if (!window.confirm(`¿Archivar el archivo ${tipo}? El historial se conservará.`)) return;
     try {
       await api.patch(`/expedientes/${expedienteId}/movimientos/${movId}/adjunto`, {
         tipo_adjunto: tipo,
-        accion: 'ELIMINAR'
+        accion: 'ARCHIVAR',
+        user_id: actorUserId,
       });
-      addToast(`Adjunto ${tipo} eliminado`, 'info');
+      addToast(`Adjunto ${tipo} archivado; el historial fue conservado`, 'info');
       await loadData();
     } catch (err: any) {
-      addToast(err.detail || err.message || 'Error al eliminar adjunto', 'error');
+      addToast(err.detail || err.message || 'Error al archivar adjunto', 'error');
     }
   };
 
-  // Handler: Eliminar Movimiento Operativamente (Sin motivo obligatorio, desapreciendo inmediatamente)
-  const handleDeleteMovimiento = async (e: React.FormEvent) => {
+  const handleReverseMovimiento = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorDetail(null);
 
     if (!selectedMovId) return;
+    if (!reverseReason.trim()) {
+      addToast('Explica el motivo de la reversión', 'error');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
-      const res = await api.delete(`/expedientes/${expedienteId}/movimientos/${selectedMovId}`);
-
-      if (res?.success === false) {
-        const exactMsg = res.detail || res.error || 'Error al eliminar el movimiento';
-        setErrorDetail(`Status: ${res.status || 500} - ${exactMsg}`);
-        addToast(`Error: ${exactMsg}`, 'error');
-        return;
-      }
-
-      addToast('Movimiento eliminado exitosamente', 'info');
-      setShowDeleteModal(false);
+      await api.post(`/expedientes/${expedienteId}/movimientos/${selectedMovId}/revertir`, {
+        motivo_reversion: reverseReason.trim(),
+        user_id: actorUserId,
+      });
+      addToast('Movimiento revertido con contramovimiento y bitácora', 'success');
+      setShowReverseModal(false);
       setSelectedMovId('');
+      setReverseReason('');
       await loadData();
       if (onUpdate) onUpdate();
     } catch (err: any) {
-      console.error('[ExpedienteFinanzasTab] Error al eliminar movimiento:', err);
-      const exactMsg = err.detail || err.message || 'Error al eliminar movimiento';
+      console.error('[ExpedienteFinanzasTab] Error al revertir movimiento:', err);
+      const exactMsg = err.detail || err.message || 'Error al revertir movimiento';
       setErrorDetail(`Status: ${err.status || 500} - ${exactMsg}`);
       addToast(`Error: ${exactMsg}`, 'error');
     } finally {
@@ -339,8 +357,8 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
         </div>
       )}
 
-      {/* ── 1. ENCABEZADO FINANCIERO DEL EXPEDIENTE (6 INDICADORES REALES) ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+      {/* ── 1. ENCABEZADO FINANCIERO DEL EXPEDIENTE ─────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-3">
         
         {/* Total Presupuestado Cliente */}
         <div className="p-4 rounded-xl bg-slate-900 border border-white/10 space-y-1">
@@ -382,6 +400,18 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
           <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">Total Egresado</span>
           <p className="text-lg font-black text-amber-400 font-mono">{formatCurrency(totalEgresado)}</p>
           <p className="text-[10px] text-amber-500">Notaría y terceros</p>
+        </div>
+
+        <div className="p-4 rounded-xl bg-slate-900 border border-cyan-500/30 space-y-1">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">Saldo Terceros</span>
+          <p className="text-lg font-black text-cyan-400 font-mono">{formatCurrency(saldoTerceros)}</p>
+          <p className="text-[10px] text-slate-400">Por pagar del presupuesto</p>
+        </div>
+
+        <div className="p-4 rounded-xl bg-slate-900 border border-violet-500/30 space-y-1">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-violet-400">Fondos Retenidos</span>
+          <p className="text-lg font-black text-violet-400 font-mono">{formatCurrency(fondosRetenidos)}</p>
+          <p className="text-[10px] text-slate-400">Dinero bajo resguardo</p>
         </div>
 
       </div>
@@ -524,11 +554,11 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDeleteAdjunto(m.id, 'COMPROBANTE')}
-                              title="Eliminar Comprobante"
+                              onClick={() => handleArchiveAdjunto(m.id, 'COMPROBANTE')}
+                              title="Archivar comprobante (conserva historial)"
                               className="p-1 rounded hover:bg-rose-500/20 text-rose-400 transition-all cursor-pointer"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Archive className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         ) : (
@@ -582,11 +612,11 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDeleteAdjunto(m.id, 'FACTURA_PDF')}
-                              title="Eliminar Factura PDF"
+                              onClick={() => handleArchiveAdjunto(m.id, 'FACTURA_PDF')}
+                              title="Archivar factura PDF (conserva historial)"
                               className="p-1 rounded hover:bg-rose-500/20 text-rose-400 transition-all cursor-pointer"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Archive className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         ) : (
@@ -642,11 +672,11 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDeleteAdjunto(m.id, 'FACTURA_XML')}
-                              title="Eliminar Factura XML"
+                              onClick={() => handleArchiveAdjunto(m.id, 'FACTURA_XML')}
+                              title="Archivar factura XML (conserva historial)"
                               className="p-1 rounded hover:bg-rose-500/20 text-rose-400 transition-all cursor-pointer"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Archive className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         ) : (
@@ -673,12 +703,12 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
                             type="button"
                             onClick={() => {
                               setSelectedMovId(m.id);
-                              setShowDeleteModal(true);
+                              setShowReverseModal(true);
                             }}
-                            title="Eliminar movimiento"
+                            title="Revertir movimiento con motivo"
                             className="p-1.5 rounded hover:bg-rose-500/20 text-rose-400 transition-colors cursor-pointer"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <RotateCcw className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>
@@ -712,7 +742,15 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
                   <label className="block text-[11px] font-bold text-slate-300 mb-1">Naturaleza</label>
                   <select
                     value={movForm.naturaleza}
-                    onChange={(e) => setMovForm({ ...movForm, naturaleza: e.target.value as any })}
+                    onChange={(e) => {
+                      const nextNature = e.target.value as 'INGRESO' | 'EGRESO';
+                      setMovForm({
+                        ...movForm,
+                        naturaleza: nextNature,
+                        tipo_movimiento: nextNature === 'EGRESO' ? 'EGRESO_TERCEROS' : 'ANTICIPO',
+                        categoria: nextNature === 'EGRESO' ? 'TERCEROS' : 'CLIENTE_FONDOS',
+                      });
+                    }}
                     className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white font-bold"
                   >
                     <option value="INGRESO">INGRESO (Cobro al cliente)</option>
@@ -724,7 +762,22 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
                   <label className="block text-[11px] font-bold text-slate-300 mb-1">Tipo de Movimiento</label>
                   <select
                     value={movForm.tipo_movimiento}
-                    onChange={(e) => setMovForm({ ...movForm, tipo_movimiento: e.target.value })}
+                    onChange={(e) => {
+                      const nextType = e.target.value;
+                      const isExpense = ['EGRESO_NOTARIA', 'EGRESO_TERCEROS', 'DEVOLUCION'].includes(nextType);
+                      setMovForm({
+                        ...movForm,
+                        tipo_movimiento: nextType,
+                        naturaleza: isExpense ? 'EGRESO' : 'INGRESO',
+                        categoria: nextType === 'EGRESO_NOTARIA'
+                          ? 'NOTARIA'
+                          : nextType === 'DEVOLUCION'
+                            ? 'DEVOLUCION'
+                            : isExpense
+                              ? 'TERCEROS'
+                              : 'CLIENTE_FONDOS',
+                      });
+                    }}
                     className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white font-bold"
                   >
                     <option value="ANTICIPO">ANTICIPO (50%)</option>
@@ -741,13 +794,26 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-300 mb-1">Categoría</label>
-                  <input
-                    type="text"
+                  <select
                     value={movForm.categoria}
                     onChange={(e) => setMovForm({ ...movForm, categoria: e.target.value })}
-                    placeholder="Ej. Notaría, ISR, Registro"
                     className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white"
-                  />
+                  >
+                    {movForm.naturaleza === 'INGRESO' ? (
+                      <>
+                        <option value="CLIENTE_FONDOS">Fondos recibidos del cliente</option>
+                        <option value="HONORARIOS_PRAVIA">Honorarios PRAVIA recibidos</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="NOTARIA">Pago a notaría</option>
+                        <option value="IMPUESTOS_DERECHOS">Impuestos y derechos</option>
+                        <option value="TERCEROS">Pago a terceros</option>
+                        <option value="PRAVIA">Gasto interno PRAVIA</option>
+                        <option value="DEVOLUCION">Devolución al cliente</option>
+                      </>
+                    )}
+                  </select>
                 </div>
 
                 <div>
@@ -949,26 +1015,37 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
         </div>
       )}
 
-      {/* ── MODAL 3: ELIMINACIÓN OPERATIVA SIMPLE (SIN MOTIVO REQUERIDO) ───── */}
-      {showDeleteModal && (
+      {/* ── MODAL 3: REVERSIÓN AUDITABLE ─────────────────────────────────── */}
+      {showReverseModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
-              <h3 className="font-bold text-white text-base">Eliminar Movimiento</h3>
-              <button type="button" onClick={() => setShowDeleteModal(false)} className="text-slate-400 hover:text-white">
+              <h3 className="font-bold text-white text-base">Revertir movimiento</h3>
+              <button type="button" onClick={() => setShowReverseModal(false)} className="text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleDeleteMovimiento} className="space-y-4 text-xs">
+            <form onSubmit={handleReverseMovimiento} className="space-y-4 text-xs">
               <p className="text-slate-200 text-sm font-medium">
-                ¿Deseas eliminar este movimiento?
+                Se generará un contramovimiento y se conservará la trazabilidad completa.
               </p>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 mb-1">Motivo de la reversión</label>
+                <textarea
+                  required
+                  minLength={5}
+                  value={reverseReason}
+                  onChange={(event) => setReverseReason(event.target.value)}
+                  placeholder="Explica por qué debe revertirse este movimiento"
+                  className="w-full min-h-24 bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white resize-y"
+                />
+              </div>
 
               <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
                 <button
                   type="button"
-                  onClick={() => setShowDeleteModal(false)}
+                  onClick={() => setShowReverseModal(false)}
                   className="px-4 py-2 text-slate-400 hover:text-white font-bold rounded-xl"
                 >
                   Cancelar
@@ -978,7 +1055,7 @@ export const ExpedienteFinanzasTab: React.FC<ExpedienteFinanzasTabProps> = ({
                   disabled={isSubmitting}
                   className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl shadow-md cursor-pointer disabled:opacity-50"
                 >
-                  {isSubmitting ? 'Eliminando...' : 'Eliminar'}
+                  {isSubmitting ? 'Revirtiendo...' : 'Confirmar reversión'}
                 </button>
               </div>
             </form>

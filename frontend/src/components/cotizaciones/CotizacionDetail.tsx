@@ -4,9 +4,11 @@ import { useNavigate } from 'react-router-dom';
 import { 
   X, Clock, User, Building2, FileText, CheckCircle2, AlertCircle, 
   Send, DollarSign, History, ChevronRight, Upload, Copy, Mail, Plus,
-  ShieldCheck, Download, Lock, Check, AlertTriangle, FileSpreadsheet, Eye, Layers, Trash2, Phone, MessageSquare, ArrowRightLeft
+  ShieldCheck, Download, Lock, Check, AlertTriangle, FileSpreadsheet, Eye, Layers, Trash2, Phone, MessageSquare, ArrowRightLeft,
+  Receipt, BadgeCheck
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { useAuthStore } from '../../stores/authStore';
 
 interface CotizacionDetailProps {
   cotizacionId: string;
@@ -87,6 +89,8 @@ function formatDateMilestone(dateString?: string | null) {
 
 export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: CotizacionDetailProps) {
   const navigate = useNavigate();
+  const userRole = useAuthStore((state) => state.user?.rol);
+  const canValidateAdvance = userRole === 'DIRECCION' || userRole === 'ADMINISTRACION';
 
   const [cotizacion, setCotizacion] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState<'resumen' | 'solicitud' | 'presupuesto' | 'documentos' | 'seguimiento' | 'bitacora'>('resumen');
@@ -102,6 +106,9 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
   const [showConversionConfirmModal, setShowConversionConfirmModal] = useState(false);
   const [isConvertingExpediente, setIsConvertingExpediente] = useState(false);
   const [conversionSuccessResult, setConversionSuccessResult] = useState<any | null>(null);
+  const [advanceAmount, setAdvanceAmount] = useState('');
+  const [isRegisteringAdvance, setIsRegisteringAdvance] = useState(false);
+  const [validatingAdvanceId, setValidatingAdvanceId] = useState<string | null>(null);
 
   // Budget form state (dynamic rubros)
   const [budgetItems, setBudgetItems] = useState<Array<{ id: string, concepto: string, monto: number }>>([
@@ -234,11 +241,11 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
       await api.put(`/cotizaciones/${cotizacionId}/participacion-pravia`, {
         monto: praviaMonto
       });
-      setToastMessage('🎉 Participación PRAVIA guardada correctamente.');
+      setToastMessage('Participación PRAVIA guardada correctamente.');
       loadCotizacion();
       onUpdate();
     } catch (err: any) {
-      setToastMessage(`❌ Error al guardar participación PRAVIA: ${err?.detail || err?.message}`);
+      setToastMessage(`Error al guardar participación PRAVIA: ${err?.detail || err?.message}`);
     } finally {
       setIsSavingPravia(false);
     }
@@ -250,10 +257,10 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
       if (res?.url) {
         window.open(res.url, '_blank');
       } else {
-        setToastMessage('⚠️ No se pudo obtener la URL firmada del documento');
+        setToastMessage('No se pudo obtener la URL firmada del documento');
       }
     } catch (err: any) {
-      setToastMessage(`❌ Error al abrir PDF: ${err?.detail || err?.message || 'No disponible'}`);
+      setToastMessage(`Error al abrir PDF: ${err?.detail || err?.message || 'No disponible'}`);
     }
   };
 
@@ -264,7 +271,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
     const currentPdfDoc = presupuestoDocs[0] || null;
 
     if (!currentPdfDoc && !fileInputRef.current?.files?.[0]) {
-      setToastMessage('⚠️ Primero debes cargar un archivo PDF de presupuesto de notaría.');
+      setToastMessage('Primero debes cargar un archivo PDF de presupuesto de notaría.');
       return;
     }
 
@@ -290,10 +297,10 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
         setToastMessage(`✨ Extracción IA completada. ${extracted.rubros.length} rubros cargados (Total: $${newTotalNotaria.toLocaleString('es-MX', { minimumFractionDigits: 2 })}).`);
       } else {
         if (extracted?.debug) setExtractionDebug(extracted.debug);
-        setToastMessage('⚠️ No se detectaron montos en el PDF. Revisa el documento o captura los conceptos manualmente.');
+        setToastMessage('No se detectaron montos en el PDF. Revisa el documento o captura los conceptos manualmente.');
       }
     } catch (err: any) {
-      setToastMessage(`⚠️ Extracción IA: ${err?.detail || err?.message || 'Procesamiento manual activo'}`);
+      setToastMessage(`Extracción IA: ${err?.detail || err?.message || 'Procesamiento manual activo'}`);
     } finally {
       setIsExtractingIA(false);
     }
@@ -304,7 +311,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
     if (!file) return;
 
     if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-      setToastMessage('⚠️ Solo se permiten archivos PDF.');
+      setToastMessage('Solo se permiten archivos PDF.');
       event.target.value = '';
       return;
     }
@@ -332,11 +339,11 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
         console.warn('Extracción IA silenciosa no completada:', iaErr);
       }
 
-      setToastMessage('🎉 Presupuesto PDF cargado e integrado correctamente');
+      setToastMessage('Presupuesto PDF cargado e integrado correctamente');
       await loadCotizacion();
       onUpdate();
     } catch (err: any) {
-      setToastMessage(`❌ ${err?.detail || err?.message || 'Error al subir el presupuesto PDF'}`);
+      setToastMessage(err?.detail || err?.message || 'Error al subir el presupuesto PDF');
     } finally {
       setIsUploadingPdf(false);
       event.target.value = '';
@@ -349,11 +356,45 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
     try {
       await api.put(`/cotizaciones/${cotizacionId}/estado`, { estado: newEstado });
       setIsChangingEstado(false);
-      setToastMessage(`🔄 Estado actualizado a ${newEstado.replace(/_/g, ' ')}`);
+      setToastMessage(`Estado actualizado a ${newEstado.replace(/_/g, ' ')}`);
       loadCotizacion();
       onUpdate();
     } catch (err: any) {
-      setToastMessage(`❌ ${err?.detail || err?.message || 'Error al cambiar estado.'}`);
+      setToastMessage(err?.detail || err?.message || 'Error al cambiar estado.');
+    }
+  };
+
+  const handleRegisterAdvance = async () => {
+    const amount = Number(advanceAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setToastMessage('Captura un monto de anticipo mayor a cero.');
+      return;
+    }
+    setIsRegisteringAdvance(true);
+    try {
+      await api.post(`/cotizaciones/${cotizacionId}/anticipo`, { monto: amount });
+      setAdvanceAmount('');
+      setToastMessage('Anticipo registrado; requiere validación administrativa.');
+      await loadCotizacion();
+      onUpdate();
+    } catch (err: any) {
+      setToastMessage(err?.detail || err?.message || 'No fue posible registrar el anticipo.');
+    } finally {
+      setIsRegisteringAdvance(false);
+    }
+  };
+
+  const handleValidateAdvance = async (paymentId: string) => {
+    setValidatingAdvanceId(paymentId);
+    try {
+      await api.post(`/cotizaciones/pago/${paymentId}/validar`, {});
+      setToastMessage('Anticipo validado correctamente.');
+      await loadCotizacion();
+      onUpdate();
+    } catch (err: any) {
+      setToastMessage(err?.detail || err?.message || 'No fue posible validar el anticipo.');
+    } finally {
+      setValidatingAdvanceId(null);
     }
   };
 
@@ -371,11 +412,11 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
         notas: autoAprobar ? 'Versión aprobada e inmutable' : 'Borrador de versión de presupuesto'
       });
 
-      setToastMessage(autoAprobar ? '🎉 Versión de presupuesto APROBADA' : '💾 Borrador de versión guardado');
+      setToastMessage(autoAprobar ? 'Versión de presupuesto aprobada.' : 'Borrador de versión guardado.');
       loadCotizacion();
       onUpdate();
     } catch (err: any) {
-      setToastMessage(`❌ Error al guardar versión: ${err?.detail || err?.message}`);
+      setToastMessage(`Error al guardar versión: ${err?.detail || err?.message}`);
     } finally {
       setIsSubmittingVersion(false);
     }
@@ -383,12 +424,23 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
 
   const isAlreadyConverted = cotizacion?.estado === 'CONVERTIDA_EXPEDIENTE' || Boolean(cotizacion?.expediente);
   const hasApprovedVersion = Array.isArray(cotizacion?.versiones) && cotizacion.versiones.some((v: any) => v.aprobada === true);
-  const canConvertToExpediente = !isAlreadyConverted && (
-    cotizacion?.estado === 'ACEPTADA' || 
-    cotizacion?.estado === 'APROBADA' || 
-    hasApprovedVersion ||
-    (cotizacion?.versiones && cotizacion.versiones.length > 0)
+  const quoteAdvances = Array.isArray(cotizacion?.pagos)
+    ? cotizacion.pagos.filter((payment: any) => payment.categoria_ingreso === 'ANTICIPO_NOTARIA')
+    : [];
+  const validatedAdvanceTotal = quoteAdvances
+    .filter((payment: any) => payment.estatus === 'VALIDADO')
+    .reduce((sum: number, payment: any) => sum + Number(payment.monto || 0), 0);
+  const hasValidatedAdvance = validatedAdvanceTotal > 0;
+  const canConvertToExpediente = cotizacion?.conversion?.eligible ?? (
+    !isAlreadyConverted
+    && cotizacion?.estado === 'ACEPTADA'
+    && hasApprovedVersion
+    && hasValidatedAdvance
+    && Boolean(cotizacion?.prospecto_id)
   );
+  const allowedTransitions: string[] = Array.isArray(cotizacion?.transiciones_permitidas)
+    ? cotizacion.transiciones_permitidas
+    : [];
 
   const handleConvertExpedienteClick = () => {
     if (isAlreadyConverted) {
@@ -397,13 +449,16 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
         onClose();
         navigate(`/expedientes/${expId}`);
       } else {
-        setToastMessage('⚠️ El expediente ya fue aperturado previamente.');
+        setToastMessage('El expediente ya fue aperturado previamente.');
       }
       return;
     }
 
     if (!canConvertToExpediente) {
-      setToastMessage('⚠️ Requisitos: La cotización debe estar ACEPTADA o tener una versión del presupuesto aprobada.');
+      const failures = cotizacion?.conversion?.failures;
+      setToastMessage(Array.isArray(failures) && failures.length
+        ? failures.join(' ')
+        : 'La cotización requiere aceptación, versión aprobada y anticipo validado antes de convertirse.');
       return;
     }
 
@@ -417,11 +472,11 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
       const createdExp = res?.data || res;
       setConversionSuccessResult(createdExp);
       setShowConversionConfirmModal(false);
-      setToastMessage(`🎉 ¡Expediente ${createdExp.numero_pravia || ''} aperturado correctamente!`);
+      setToastMessage(`Expediente ${createdExp.numero_pravia || ''} aperturado correctamente.`);
       loadCotizacion();
       onUpdate();
     } catch (err: any) {
-      setToastMessage(`❌ ${err?.detail || err?.message || 'Error al convertir a expediente'}`);
+      setToastMessage(err?.detail || err?.message || 'Error al convertir a expediente');
     } finally {
       setIsConvertingExpediente(false);
     }
@@ -434,10 +489,10 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
       if (res?.url) {
         setPreviewDocument({ url: res.url, doc });
       } else {
-        setToastMessage('⚠️ No se pudo obtener la URL del documento');
+        setToastMessage('No se pudo obtener la URL del documento');
       }
     } catch (err: any) {
-      setToastMessage(`❌ ${err?.detail || err?.message || 'Error al obtener documento'}`);
+      setToastMessage(err?.detail || err?.message || 'Error al obtener documento');
     }
   };
 
@@ -445,7 +500,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
     try {
       const res = await api.get(`/documentos/${doc.id}/url`);
       if (res?.url) {
-        setToastMessage('⏳ Iniciando descarga...');
+        setToastMessage('Iniciando descarga...');
         const response = await fetch(res.url);
         const blob = await response.blob();
         const blobUrl = window.URL.createObjectURL(blob);
@@ -456,29 +511,29 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
         link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(blobUrl);
-        setToastMessage('⬇️ Descarga completada');
+        setToastMessage('Descarga completada');
       }
     } catch (err: any) {
-      setToastMessage(`❌ Error al descargar: ${err?.detail || err?.message}`);
+      setToastMessage(`Error al descargar: ${err?.detail || err?.message}`);
     }
   };
 
   const handleConfirmDeleteDocument = async (docId: string) => {
     try {
       await api.delete(`/documentos/${docId}`);
-      setToastMessage('🗑️ Documento eliminado correctamente.');
+      setToastMessage('Documento eliminado correctamente.');
       setDeleteDocumentConfirm(null);
       loadCotizacion();
       onUpdate();
     } catch (err: any) {
-      setToastMessage(`❌ Error al eliminar documento: ${err?.detail || err?.message}`);
+      setToastMessage(`Error al eliminar documento: ${err?.detail || err?.message}`);
     }
   };
 
   // Seguimiento Handler
   const handleCreateSeguimiento = async () => {
     if (!seguimientoResumen.trim()) {
-      setToastMessage('⚠️ Escribe un resumen para el seguimiento.');
+      setToastMessage('Escribe un resumen para el seguimiento.');
       return;
     }
     setIsSavingSeguimiento(true);
@@ -504,7 +559,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
       loadCotizacion();
       onUpdate();
     } catch (err: any) {
-      setToastMessage(`❌ ${err?.detail || err?.message || 'Error al guardar seguimiento'}`);
+      setToastMessage(err?.detail || err?.message || 'Error al guardar seguimiento');
     } finally {
       setIsSavingSeguimiento(false);
     }
@@ -682,7 +737,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
               <EstadoBadge estado={cotizacion.estado} />
               {isRetrasada && (
                 <span className="badge badge-danger" style={{ fontSize: '0.7rem' }}>
-                  ⚠️ Retrasada
+                  <AlertTriangle size={12} aria-hidden="true" /> Retrasada
                 </span>
               )}
             </div>
@@ -772,6 +827,8 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
             <button 
               onClick={() => setIsChangingEstado(!isChangingEstado)}
               className="btn btn-secondary"
+              disabled={allowedTransitions.length === 0}
+              title={allowedTransitions.length === 0 ? 'No hay transiciones manuales disponibles desde el estado actual' : undefined}
               style={{ fontSize: '0.75rem' }}
             >
               <RefreshCwIcon size={14} style={{ marginRight: '4px' }} /> Cambiar Estado
@@ -818,6 +875,8 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
               <button
                 onClick={handleConvertExpedienteClick}
                 className="btn btn-primary"
+                disabled={!canConvertToExpediente}
+                title={!canConvertToExpediente ? 'Requiere aceptación, presupuesto aprobado y anticipo validado' : undefined}
                 style={{ 
                   fontSize: '0.8rem', 
                   fontWeight: 700
@@ -845,16 +904,10 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
               className="input-field"
               style={{ fontSize: '0.8rem', padding: 'var(--space-2)' }}
             >
-              <option value="">-- Seleccionar Nuevo Estado --</option>
-              <option value="BORRADOR">BORRADOR</option>
-              <option value="ENVIADA_NOTARIA">ENVIADA NOTARIA</option>
-              <option value="PRESUPUESTO_RECIBIDO">PRESUPUESTO RECIBIDO</option>
-              <option value="EN_REVISION_ABOGADO">EN REVISION ABOGADO</option>
-              <option value="ENVIADA_CLIENTE">ENVIADA CLIENTE</option>
-              <option value="EN_NEGOCIACION">EN NEGOCIACION</option>
-              <option value="ACEPTADA">ACEPTADA (Lista para Expediente)</option>
-              <option value="RECHAZADA">RECHAZADA</option>
-              <option value="VENCIDA">VENCIDA</option>
+              <option value="">Seleccionar siguiente estado</option>
+              {allowedTransitions.map((transition) => (
+                <option value={transition} key={transition}>{transition.replace(/_/g, ' ')}</option>
+              ))}
             </select>
 
             <button onClick={handleEstadoChange} className="btn btn-primary" style={{ fontSize: '0.75rem' }}>
@@ -1017,7 +1070,83 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
                       <span style={{ color: 'var(--text-muted)' }}>Participación PRAVIA (Interna):</span>
                       <strong style={{ color: 'var(--color-primary-light)' }}>${praviaMonto.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</strong>
                     </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Anticipo Validado:</span>
+                      <strong style={{ color: hasValidatedAdvance ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                        ${validatedAdvanceTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                      </strong>
+                    </div>
                   </div>
+                </div>
+
+                {/* Bloque: Anticipo y validación administrativa */}
+                <div className="glass-card" style={{ padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-2)', borderBottom: '1px solid var(--border-color)', paddingBottom: 'var(--space-2)' }}>
+                    <h4 style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', margin: 0 }}>
+                      <Receipt size={16} aria-hidden="true" /> Anticipo del Cliente
+                    </h4>
+                    <span className={`badge ${hasValidatedAdvance ? 'badge-success' : 'badge-warning'}`}>
+                      {hasValidatedAdvance ? 'Validado' : 'Pendiente'}
+                    </span>
+                  </div>
+
+                  {quoteAdvances.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                      {quoteAdvances.map((payment: any) => (
+                        <div key={payment.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: 'var(--bg-primary)' }}>
+                          <div>
+                            <strong style={{ display: 'block', fontSize: '0.9rem' }}>
+                              {Number(payment.monto || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' })}
+                            </strong>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>
+                              {payment.estatus} · {formatDateMilestone(payment.fecha_pago || payment.fecha_registro)}
+                            </span>
+                          </div>
+                          {payment.estatus === 'RECIBIDO' && canValidateAdvance && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              disabled={validatingAdvanceId === payment.id}
+                              onClick={() => handleValidateAdvance(payment.id)}
+                            >
+                              <BadgeCheck size={15} aria-hidden="true" />
+                              {validatingAdvanceId === payment.id ? 'Validando…' : 'Validar'}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>
+                      Aún no se ha registrado un anticipo para esta cotización.
+                    </p>
+                  )}
+
+                  {cotizacion?.estado === 'ACEPTADA' && !isAlreadyConverted && (
+                    <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'end', flexWrap: 'wrap' }}>
+                      <label style={{ flex: '1 1 180px', display: 'grid', gap: 'var(--space-1)', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
+                        Monto recibido (MXN)
+                        <input
+                          className="input-field"
+                          type="number"
+                          inputMode="decimal"
+                          min="0.01"
+                          step="0.01"
+                          value={advanceAmount}
+                          onChange={(event) => setAdvanceAmount(event.target.value)}
+                          placeholder="0.00"
+                        />
+                      </label>
+                      <button type="button" className="btn btn-primary" disabled={isRegisteringAdvance || !advanceAmount} onClick={handleRegisterAdvance}>
+                        {isRegisteringAdvance ? 'Registrando…' : 'Registrar anticipo'}
+                      </button>
+                    </div>
+                  )}
+                  {cotizacion?.estado !== 'ACEPTADA' && !isAlreadyConverted && (
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', margin: 0 }}>
+                      El registro se habilita después de la aceptación del cliente.
+                    </p>
+                  )}
                 </div>
 
                 {/* Bloque: Requisitos para Expediente */}
@@ -1026,16 +1155,20 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
                     Requisitos para Convertir a Expediente
                   </h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: '0.8rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: (cotizacion?.estado === 'ACEPTADA' || cotizacion?.estado === 'APROBADA') ? 'var(--color-success)' : 'var(--text-muted)' }}>
-                      <span>{(cotizacion?.estado === 'ACEPTADA' || cotizacion?.estado === 'APROBADA') ? '✓' : '❌'}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: cotizacion?.estado === 'ACEPTADA' ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                      {cotizacion?.estado === 'ACEPTADA' ? <CheckCircle2 size={16} aria-hidden="true" /> : <AlertCircle size={16} aria-hidden="true" />}
                       <span>Cotización Aceptada por Cliente</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: hasApprovedVersion ? 'var(--color-success)' : 'var(--text-muted)' }}>
-                      <span>{hasApprovedVersion ? '✓' : '❌'}</span>
+                      {hasApprovedVersion ? <CheckCircle2 size={16} aria-hidden="true" /> : <AlertCircle size={16} aria-hidden="true" />}
                       <span>Versión de Presupuesto Aprobada</span>
                     </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: hasValidatedAdvance ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                      {hasValidatedAdvance ? <CheckCircle2 size={16} aria-hidden="true" /> : <AlertCircle size={16} aria-hidden="true" />}
+                      <span>Anticipo Validado por Administración</span>
+                    </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: !isAlreadyConverted ? 'var(--color-success)' : 'var(--text-muted)' }}>
-                      <span>{!isAlreadyConverted ? '✓' : '❌'}</span>
+                      {!isAlreadyConverted ? <CheckCircle2 size={16} aria-hidden="true" /> : <AlertCircle size={16} aria-hidden="true" />}
                       <span>No Convertida Previamente</span>
                     </div>
                   </div>
@@ -1230,7 +1363,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
                       className="btn btn-secondary"
                       style={{ fontSize: '0.75rem', padding: 'var(--space-1) var(--space-3)', opacity: isExtractingIA ? 0.6 : 1 }}
                     >
-                      {isExtractingIA ? '⏳ Extrayendo con IA...' : '✨ Extraer con IA'}
+                      {isExtractingIA ? 'Extrayendo con IA...' : 'Extraer con IA'}
                     </button>
                   </div>
 
@@ -1341,7 +1474,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
                       className="btn btn-secondary"
                       style={{ fontSize: '0.75rem', padding: 'var(--space-1) var(--space-4)' }}
                     >
-                      {isSavingPravia ? '⏳ Guardando...' : 'Guardar'}
+                      {isSavingPravia ? 'Guardando...' : 'Guardar'}
                     </button>
                   </div>
                 </div>
@@ -1355,7 +1488,7 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
                       className="btn btn-secondary"
                       style={{ fontSize: '0.8rem' }}
                     >
-                      💾 Guardar Borrador V{cotizacion.version_actual}
+                      Guardar Borrador V{cotizacion.version_actual}
                     </button>
                     <button 
                       onClick={() => handleGuardarNuevaVersion(true)}
@@ -1501,10 +1634,10 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
                                 if (confirm(`¿Desvincular "${doc.nombre_original}" de la Cotización? No se eliminará del Prospecto ni del almacenamiento.`)) {
                                   try {
                                     await api.delete(`/cotizaciones/${cotizacionId}/documentos/${doc.id}`);
-                                    setToastMessage('🎉 Documento desvinculado de la cotización exitosamente.');
+                                    setToastMessage('Documento desvinculado de la cotización exitosamente.');
                                     loadCotizacion();
                                   } catch (err: any) {
-                                    setToastMessage('❌ Error al desvincular documento.');
+                                    setToastMessage('Error al desvincular documento.');
                                   }
                                 }
                               }}
@@ -1549,11 +1682,11 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
                     <div>
                       <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block' }}>Tipo de Contacto</label>
                       <select value={seguimientoTipo} onChange={e => setSeguimientoTipo(e.target.value)} className="input-field" style={{ width: '100%', fontSize: '0.8rem', padding: 'var(--space-2)' }}>
-                        <option value="llamada">📞 Llamada Telefónica</option>
-                        <option value="whatsapp">💬 WhatsApp</option>
-                        <option value="correo">✉️ Correo Electrónico</option>
-                        <option value="reunion">👥 Reunión Presencial</option>
-                        <option value="nota">📝 Nota Interna</option>
+                        <option value="llamada">Llamada Telefónica</option>
+                        <option value="whatsapp">WhatsApp</option>
+                        <option value="correo">Correo Electrónico</option>
+                        <option value="reunion">Reunión Presencial</option>
+                        <option value="nota">Nota Interna</option>
                       </select>
                     </div>
 
@@ -1731,9 +1864,10 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
 
             <div style={{ background: 'var(--bg-primary)', padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div><span style={{ color: 'var(--text-muted)' }}>Cliente / Prospecto:</span> <strong style={{ color: 'var(--text-primary)' }}>{cotizacion?.prospecto?.nombre || cotizacion?.cliente_alias || 'Cliente'}</strong></div>
-              <div><span style={{ color: 'var(--text-muted)' }}>Tipo de Acto:</span> <strong style={{ color: 'var(--text-primary)' }}>{cotizacion?.prospecto?.tipo_acto || 'Compraventa Inmobiliaria'}</strong></div>
-              <div><span style={{ color: 'var(--text-muted)' }}>Notaría Asignada:</span> <strong style={{ color: 'var(--text-primary)' }}>{cotizacion?.notaria?.nombre || 'Notaría Principal'}</strong></div>
+              <div><span style={{ color: 'var(--text-muted)' }}>Tipo de Acto:</span> <strong style={{ color: 'var(--text-primary)' }}>{cotizacion?.prospecto?.tipo_acto || 'No definido'}</strong></div>
+              <div><span style={{ color: 'var(--text-muted)' }}>Notaría Asignada:</span> <strong style={{ color: 'var(--text-primary)' }}>{cotizacion?.notaria?.nombre || 'No asignada'}</strong></div>
               <div><span style={{ color: 'var(--text-muted)' }}>Presupuesto Total:</span> <strong style={{ color: 'var(--color-success)' }}>${Number(cotizacion?.total_cliente || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</strong></div>
+              <div><span style={{ color: 'var(--text-muted)' }}>Anticipo Validado:</span> <strong style={{ color: 'var(--color-success)' }}>${validatedAdvanceTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</strong></div>
               <div><span style={{ color: 'var(--text-muted)' }}>Participación PRAVIA:</span> <strong style={{ color: '#fbbf24' }}>${Number(cotizacion?.honorarios_pravia || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</strong></div>
               <div><span style={{ color: 'var(--text-muted)' }}>Trazabilidad Documental:</span> <strong style={{ color: '#38bdf8' }}>{cotizacionDocumentos.length || uniqueDocumentos.length} documento(s) vinculados</strong></div>
             </div>
@@ -1757,7 +1891,8 @@ export default function CotizacionDetail({ cotizacionId, onClose, onUpdate }: Co
                 className="btn btn-primary" 
                 style={{ fontSize: '0.8rem', fontWeight: 700 }}
               >
-                {isConvertingExpediente ? 'Aperturando Expediente...' : '✓ Confirmar Conversión'}
+                {!isConvertingExpediente && <CheckCircle2 size={15} aria-hidden="true" />}
+                {isConvertingExpediente ? 'Aperturando Expediente...' : 'Confirmar Conversión'}
               </button>
             </div>
           </div>

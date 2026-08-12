@@ -1,12 +1,36 @@
 import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { PrismaClient, ExpedienteEstatus, TipoMovimiento, NaturalezaMovimiento, DocEstatus } from '@prisma/client';
-import { ExpedienteWorkflowService } from '../services/expedienteWorkflow.service';
+import { ExpedienteEstatus, TipoMovimiento, NaturalezaMovimiento, DocEstatus, DocCategoria, Prisma } from '@prisma/client';
+import { ExpedienteWorkflowService, TransicionPayload } from '../services/expedienteWorkflow.service';
 import { calculateExpedienteProgress } from '../services/expedienteProgress.service';
 import { downloadFile, uploadFile, deleteFile } from '../services/supabase.service';
+import prisma from '../config/prisma';
+import { CotizacionConversionService } from '../services/cotizacionConversion.service';
+import { CotizacionBusinessError } from '../domain/cotizacionWorkflow';
+import {
+  EXPEDIENTE_STATUS_LABELS,
+  ExpedienteWorkflowError,
+  getAllowedExpedienteTransitions,
+} from '../domain/expedienteWorkflow';
+import {
+  FinancialLedgerError,
+  normalizeFinancialCategory,
+  validateMovementSemantics,
+} from '../domain/financialLedger';
+import { expedienteAccessWhere } from '../middleware/auth.middleware';
 
-const prisma = new PrismaClient();
+const cotizacionConversionService = new CotizacionConversionService(prisma);
+
+class ExpedienteUpdateError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly status = 400,
+  ) {
+    super(message);
+  }
+}
 
 // 1. Listar Expedientes con Filtros y Paginación
 export const getExpedientes = async (req: Request, res: Response) => {
@@ -14,7 +38,8 @@ export const getExpedientes = async (req: Request, res: Response) => {
     const { estatus, abogado_id, tipo_acto_id, search, limit = 50, page = 1 } = req.query;
 
     const where: any = {
-      archived_at: null
+      archived_at: null,
+      AND: req.user ? [expedienteAccessWhere(req.user)] : [],
     };
 
     if (estatus) {
@@ -31,11 +56,11 @@ export const getExpedientes = async (req: Request, res: Response) => {
 
     if (search) {
       const searchStr = String(search).trim();
-      where.OR = [
+      where.AND.push({ OR: [
         { numero_pravia: { contains: searchStr, mode: 'insensitive' } },
         { numero_notaria: { contains: searchStr, mode: 'insensitive' } },
         { cliente_alias: { contains: searchStr, mode: 'insensitive' } }
-      ];
+      ] });
     }
 
     const take = Number(limit);
@@ -63,8 +88,9 @@ export const getExpedientes = async (req: Request, res: Response) => {
       prisma.expediente.count({ where })
     ]);
 
+    const canReadFinance = req.user?.permissions.includes('finanzas.read');
     res.json({
-      data: expedientes,
+      data: expedientes.map((item) => canReadFinance ? item : { ...item, valor_operacion: null, _count: { ...item._count, movimientosFinancieros: 0 } }),
       meta: {
         total,
         page: Number(page),
@@ -125,7 +151,12 @@ export const getExpedienteById = async (req: Request, res: Response) => {
           orderBy: { fecha_movimiento: 'desc' },
           include: {
             capturado_por: { select: { id: true, nombre: true, apellido: true } },
-            validado_por: { select: { id: true, nombre: true, apellido: true } }
+            validado_por: { select: { id: true, nombre: true, apellido: true } },
+            movimientoDocumentos: {
+              where: { estatus: 'ACTIVO' },
+              include: { documento: true },
+              orderBy: { fecha_vinculo: 'desc' },
+            },
           }
         },
         actividades: {
@@ -144,7 +175,43 @@ export const getExpedienteById = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Expediente no encontrado' });
     }
 
-    res.json(expediente);
+    const currentStageOrder = expediente.etapaActual?.orden_snapshot || 0;
+    const workflowStages = await prisma.flujoEtapa.findMany({
+      where: { tipo_acto_id: expediente.tipo_acto_id, activa: true },
+      select: {
+        clave: true,
+        nombre: true,
+        orden: true,
+        obligatoria: true,
+        se_puede_omitir: true,
+        duracion_esperada_dias: true,
+        estado_general_relacionado: true,
+      },
+      orderBy: { orden: 'asc' },
+    });
+    const allowedStatuses = getAllowedExpedienteTransitions(expediente.estatus);
+    const transitions = allowedStatuses.map((status) => ({
+      status,
+      label: EXPEDIENTE_STATUS_LABELS[status],
+      stage: workflowStages.find((stage) => stage.estado_general_relacionado === status && stage.orden > currentStageOrder) || null,
+      requires_signature_data: status === 'FIRMA_PROGRAMADA',
+      requires_notes: status === 'ENTREGADO' || status === 'CANCELADO' || status === 'SUSPENDIDO',
+    }));
+    const nextStage = workflowStages.find(
+      (stage) => stage.estado_general_relacionado === expediente.estatus && stage.orden > currentStageOrder,
+    ) || null;
+
+    const canReadFinance = req.user?.permissions.includes('finanzas.read');
+    res.json({
+      ...expediente,
+      ...(canReadFinance ? {} : { valor_operacion: null, movimientosFinancieros: [], financial_access: false }),
+      workflow: {
+        current_status_label: EXPEDIENTE_STATUS_LABELS[expediente.estatus],
+        transitions,
+        next_stage: nextStage,
+        stages: workflowStages,
+      },
+    });
   } catch (error: any) {
     res.status(500).json({ error: 'Error al obtener detalle del expediente', detail: error.message });
   }
@@ -163,9 +230,10 @@ export const createExpediente = async (req: Request, res: Response) => {
       datos_operacion
     } = req.body;
 
-    const creador_id = (req as any).user?.id || abogado_id;
+    const creador_id = req.user?.id || abogado_id;
+    const assignedLawyerId = req.user?.rol === 'ABOGADO' ? req.user.id : abogado_id;
 
-    if (!tipo_acto_id || !abogado_id || !cliente_alias) {
+    if (!tipo_acto_id || !assignedLawyerId || !cliente_alias) {
       return res.status(400).json({ error: 'Campos obligatorios requeridos: tipo_acto_id, abogado_id, cliente_alias' });
     }
 
@@ -194,7 +262,7 @@ export const createExpediente = async (req: Request, res: Response) => {
           formulario_version_id: formVer?.id,
           flujo_version_id: flujoVer?.id,
           plantilla_doc_version_id: plantDocVer?.id,
-          abogado_id,
+          abogado_id: assignedLawyerId,
           creador_id,
           cliente_alias,
           descripcion,
@@ -216,7 +284,7 @@ export const createExpediente = async (req: Request, res: Response) => {
             nombre_snapshot: primera.nombre,
             orden_snapshot: primera.orden || 1,
             duracion_esperada_snapshot: primera.dias || 3,
-            responsable_id: abogado_id
+            responsable_id: assignedLawyerId
           }
         });
 
@@ -266,190 +334,26 @@ export const createExpediente = async (req: Request, res: Response) => {
 // 4. Conversión de Cotización Aceptada a Expediente
 export const convertCotizacionToExpediente = async (req: Request, res: Response) => {
   try {
-    const { cotizacion_id, abogado_id } = req.body;
-
-    const cotizacion = await prisma.cotizacion.findUnique({
-      where: { id: cotizacion_id },
-      include: { prospecto: true, expediente: true }
+    const { cotizacion_id, abogado_id, tipo_acto_id, user_id } = req.body;
+    const result = await cotizacionConversionService.convert({
+      cotizacionId: cotizacion_id,
+      abogadoId: abogado_id,
+      tipoActoId: tipo_acto_id,
+      actorUserId: (req as any).user?.id || user_id,
+      correlationId: (req as any).correlationId,
     });
-
-    if (!cotizacion) {
-      return res.status(404).json({ error: 'Cotización no encontrada en el sistema.' });
-    }
-
-    if (cotizacion.expediente || (cotizacion.estado as string) === 'CONVERTIDA_EXPEDIENTE') {
-      return res.status(400).json({ error: 'La cotización ya fue convertida a expediente previamente.' });
-    }
-
-    // Transacción atómica de conversión
-    const expediente = await prisma.$transaction(async (tx) => {
-      // 1. Obtener y validar el Tipo de Acto del catálogo maestro
-      let targetTipoActoId = (cotizacion as any).tipo_acto_id || (cotizacion.prospecto as any)?.tipo_acto_id;
-      let tipoActo = null;
-
-      if (targetTipoActoId) {
-        tipoActo = await tx.tipoActo.findUnique({
-          where: { id: targetTipoActoId },
-          select: { id: true, activo: true, nombre: true }
-        });
-      }
-
-      if (!tipoActo || !tipoActo.activo) {
-        const nombreBuscado = cotizacion.prospecto?.tipo_acto || 'Compraventa Inmobiliaria';
-        tipoActo = await tx.tipoActo.findFirst({
-          where: {
-            activo: true,
-            OR: [
-              { nombre: { contains: nombreBuscado, mode: 'insensitive' } },
-              { nombre: { contains: 'Compraventa', mode: 'insensitive' } }
-            ]
-          },
-          select: { id: true, activo: true, nombre: true }
-        });
-      }
-
-      if (!tipoActo || !tipoActo.activo) {
-        throw new Error('No fue posible crear el expediente porque la cotización no tiene un Tipo de Acto válido asignado.');
-      }
-
-      // 2. Resolver usuario Creador y Abogado válidos
-      const defaultUser = await tx.user.findFirst({ where: { activo: true } });
-      const defaultUserId = defaultUser?.id || '8127559a-e44f-4f44-97de-cbebc68d7cd3';
-
-      const finalAbogadoId = (abogado_id && typeof abogado_id === 'string' && abogado_id.trim() !== '') 
-        ? abogado_id 
-        : defaultUserId;
-
-      const reqUserId = (req as any).user?.id;
-      const finalCreadorId = (reqUserId && typeof reqUserId === 'string' && reqUserId.trim() !== '') 
-        ? reqUserId 
-        : finalAbogadoId;
-
-      // 3. Resolver versiones vigentes de Formulario, Flujo y Plantilla Documental
-      const [formVer, flujoVer, plantDocVer] = await Promise.all([
-        tx.formularioVersion.findFirst({ where: { tipo_acto_id: tipoActo.id }, orderBy: { version: 'desc' } }),
-        tx.flujoVersion.findFirst({ where: { tipo_acto_id: tipoActo.id }, orderBy: { version: 'desc' } }),
-        tx.plantillaDocumentalVersion.findFirst({ where: { tipo_acto_id: tipoActo.id }, orderBy: { version: 'desc' } })
-      ]);
-
-      // 4. Generar Folio Único Concurrente
-      const countAño = await tx.expediente.count();
-      const añoActual = new Date().getFullYear();
-      const numero_pravia = `EXP-${añoActual}-${String(countAño + 1).padStart(4, '0')}`;
-
-      // 5. Crear Expediente usando relaciones connect explícitas y omitiendo undefined
-      const expCreateData: any = {
-        numero_pravia,
-        tipo_acto: { connect: { id: tipoActo.id } },
-        cotizacion: { connect: { id: cotizacion.id } },
-        creador: { connect: { id: finalCreadorId } },
-        abogado: { connect: { id: finalAbogadoId } },
-        cliente_alias: cotizacion.prospecto?.nombre || (cotizacion as any).cliente_alias || 'Cliente Cotización',
-        valor_operacion: cotizacion.total_cliente ? Number(cotizacion.total_cliente) : undefined,
-        estatus: 'ABIERTO'
-      };
-
-      if (cotizacion.notaria_id) {
-        expCreateData.notaria = { connect: { id: cotizacion.notaria_id } };
-      }
-      if (formVer?.id) {
-        expCreateData.formularioVersion = { connect: { id: formVer.id } };
-      }
-      if (flujoVer?.id) {
-        expCreateData.flujoVersion = { connect: { id: flujoVer.id } };
-      }
-      if (plantDocVer?.id) {
-        expCreateData.plantillaDocVersion = { connect: { id: plantDocVer.id } };
-      }
-
-      const exp = await tx.expediente.create({ data: expCreateData });
-
-      // 6. Actualizar Estado de la Cotización
-      await tx.cotizacion.update({
-        where: { id: cotizacion.id },
-        data: {
-          estado: 'CONVERTIDA_EXPEDIENTE',
-          fecha_conversion_expediente: new Date()
-        }
-      });
-
-      // 7. Vincular Documentos Inheredados de Prospecto y Cotización (Sin duplicación física)
-      const prospectoId = cotizacion.prospecto_id;
-      const cotizacionId = cotizacion.id;
-
-      const [pDocs, pVinculos, cDocs, cVinculos] = await Promise.all([
-        prospectoId ? tx.documento.findMany({ where: { prospecto_id: prospectoId } }) : [],
-        prospectoId ? tx.prospectoDocumento.findMany({ where: { prospecto_id: prospectoId, estatus: 'ACTIVO' } }) : [],
-        tx.documento.findMany({ where: { cotizacion_id: cotizacionId } }),
-        tx.cotizacionDocumento.findMany({ where: { cotizacion_id: cotizacionId, estatus: 'ACTIVO' } })
-      ]);
-
-      const docMap = new Map<string, { docId: string; folder: string }>();
-
-      pDocs.forEach(d => {
-        docMap.set(d.id, { docId: d.id, folder: 'Administrativo' });
-      });
-
-      pVinculos.forEach(v => {
-        if (!docMap.has(v.documento_id)) {
-          docMap.set(v.documento_id, { docId: v.documento_id, folder: 'Administrativo' });
-        }
-      });
-
-      cDocs.forEach(d => {
-        docMap.set(d.id, { docId: d.id, folder: 'Administrativo' });
-      });
-
-      cVinculos.forEach(v => {
-        if (!docMap.has(v.documento_id)) {
-          docMap.set(v.documento_id, { docId: v.documento_id, folder: 'Administrativo' });
-        }
-      });
-
-      for (const item of Array.from(docMap.values())) {
-        await tx.expedienteDocumento.upsert({
-          where: {
-            expediente_id_documento_id_tipo_vinculo: {
-              expediente_id: exp.id,
-              documento_id: item.docId,
-              tipo_vinculo: item.folder
-            }
-          },
-          update: { estatus: 'ACTIVO' },
-          create: {
-            expediente_id: exp.id,
-            documento_id: item.docId,
-            tipo_vinculo: item.folder,
-            creado_por_id: finalCreadorId,
-            estatus: 'ACTIVO'
-          }
-        });
-      }
-
-      // 8. Bitácora de Actividad Auditoría
-      await tx.expedienteActividad.create({
-        data: {
-          expediente_id: exp.id,
-          usuario_id: finalCreadorId,
-          tipo: 'AUDITORIA',
-          titulo: 'Conversión Transaccional desde Cotización',
-          descripcion: `Expediente aperturado desde Cotización ${cotizacion.numero_solicitud || ''}. Vinculados ${docMap.size} documento(s) heredados.`
-        }
-      });
-
-      return exp;
+    res.status(result.alreadyConverted ? 200 : 201).json({
+      ...result.expediente,
+      idempotent: result.alreadyConverted,
+      correlation_id: result.correlationId,
+      anticipo_validado: result.validatedAdvanceTotal,
     });
-
-    res.status(201).json(expediente);
   } catch (error: any) {
     console.error('[CONVERT_COTIZACION_ERROR]', error);
-
-    let cleanMessage = 'No fue posible crear el expediente porque la cotización no tiene un Tipo de Acto válido asociado.';
-    if (error.message && typeof error.message === 'string' && !error.message.includes('Prisma') && !error.message.includes('Invocation') && !error.message.includes('\\')) {
-      cleanMessage = error.message;
+    if (error instanceof CotizacionBusinessError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
     }
-
-    res.status(400).json({ error: cleanMessage });
+    res.status(500).json({ error: 'No fue posible convertir la cotización a expediente.', code: 'CONVERSION_FAILED' });
   }
 };
 
@@ -457,15 +361,58 @@ export const convertCotizacionToExpediente = async (req: Request, res: Response)
 export const transitionEstatus = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { expected_version, nuevo_estatus, notas } = req.body;
-    const actor_user_id = (req as any).user?.id;
+    const { expected_version, nuevo_estatus, nueva_etapa_clave, notas, datos_firma, user_id } = req.body;
+    const actor_user_id = (req as any).user?.id || user_id;
 
     if (!actor_user_id) {
       return res.status(401).json({ error: 'Usuario no autenticado en la sesión' });
     }
 
-    if (expected_version === undefined || !nuevo_estatus) {
-      return res.status(400).json({ error: 'Campos requeridos: expected_version, nuevo_estatus' });
+    if (expected_version === undefined || (!nuevo_estatus && !nueva_etapa_clave)) {
+      return res.status(400).json({ error: 'Campos requeridos: expected_version y un nuevo estado o etapa' });
+    }
+
+    const current = await prisma.expediente.findUnique({
+      where: { id },
+      select: {
+        tipo_acto_id: true,
+        estatus: true,
+        etapaActual: { select: { orden_snapshot: true } },
+      }
+    });
+    if (!current) return res.status(404).json({ error: 'Expediente no encontrado' });
+
+    let resolvedStageKey = nueva_etapa_clave || undefined;
+    const shouldResolveStage = nuevo_estatus && (
+      nuevo_estatus === 'EN_INTEGRACION'
+      || (current.estatus === 'EN_INTEGRACION' && nuevo_estatus === 'EN_PROCESO')
+      || ['PENDIENTE_NOTARIA', 'FIRMA_PROGRAMADA', 'FIRMADO', 'POST_FIRMA', 'ENTREGADO'].includes(nuevo_estatus)
+    );
+    if (!resolvedStageKey && shouldResolveStage) {
+      const stage = await prisma.flujoEtapa.findFirst({
+        where: {
+          tipo_acto_id: current.tipo_acto_id,
+          activa: true,
+          estado_general_relacionado: nuevo_estatus,
+          orden: { gt: current.etapaActual?.orden_snapshot || 0 },
+        },
+        orderBy: { orden: 'asc' },
+        select: { clave: true },
+      });
+      resolvedStageKey = stage?.clave;
+    }
+
+    let signatureData: TransicionPayload['datosFirma'];
+    if (datos_firma) {
+      const signatureDate = new Date(datos_firma.fecha_firma);
+      if (Number.isNaN(signatureDate.getTime())) {
+        return res.status(400).json({ error: 'La fecha de firma no es válida.' });
+      }
+      signatureData = {
+        fechaFirma: signatureDate,
+        lugar: String(datos_firma.lugar || '').trim(),
+        autorizaSaldoPendiente: Boolean(datos_firma.autoriza_saldo_pendiente),
+      };
     }
 
     const workflowService = new ExpedienteWorkflowService(prisma);
@@ -473,14 +420,22 @@ export const transitionEstatus = async (req: Request, res: Response) => {
       expedienteId: id,
       versionActual: Number(expected_version),
       nuevoEstatus: nuevo_estatus as ExpedienteEstatus,
+      nuevaEtapaClave: resolvedStageKey,
       actorUserId: actor_user_id,
-      observaciones: notas
+      observaciones: notas,
+      datosFirma: signatureData,
     });
 
     res.json(expedienteActualizado);
   } catch (error: any) {
-    const statusCode = error.statusCode || (error.message.includes('UNAUTHORIZED') ? 401 : 500);
-    res.status(statusCode).json({ error: error.message });
+    const statusCode = error instanceof ExpedienteWorkflowError
+      ? error.status
+      : error.message?.includes('[409 CONFLICT]')
+        ? 409
+        : error.message?.includes('no válido')
+          ? 401
+          : 400;
+    res.status(statusCode).json({ error: error.message, code: error.code || 'EXPEDIENTE_TRANSITION_FAILED' });
   }
 };
 
@@ -496,30 +451,29 @@ function normalizarTipoMovimiento(tipo?: string): TipoMovimiento {
   if (['EGRESO_NOTARIA', 'NOTARIA', 'PAGO_NOTARIA'].includes(t)) return 'EGRESO_NOTARIA';
   if (['EGRESO_TERCEROS', 'TERCEROS', 'DERECHOS'].includes(t)) return 'EGRESO_TERCEROS';
   if (['AJUSTE'].includes(t)) return 'AJUSTE';
-  return 'ANTICIPO';
+  throw new FinancialLedgerError('Selecciona un tipo de movimiento financiero válido.', 'FINANCIAL_TYPE_INVALID');
 }
 
 function normalizarNaturaleza(nat?: string): NaturalezaMovimiento {
   const n = (nat || '').toUpperCase().trim();
   if (n === 'EGRESO') return 'EGRESO';
-  return 'INGRESO';
+  if (n === 'INGRESO') return 'INGRESO';
+  throw new FinancialLedgerError('Selecciona si el movimiento es ingreso o egreso.', 'FINANCIAL_NATURE_INVALID');
+}
+
+async function resolveActiveFinancialActor(req: Request) {
+  const actorId = (req as any).user?.id || req.body?.user_id;
+  if (!actorId) return null;
+  return prisma.user.findFirst({ where: { id: actorId, activo: true }, select: { id: true } });
 }
 
 // 6. Registrar Movimiento Financiero
 export const addMovimientoFinanciero = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { tipo_movimiento, naturaleza, categoria, concepto, monto, forma_pago, referencia } = req.body;
-
-    let actorUserId = (req as any).user?.id || req.body.user_id;
-    if (!actorUserId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) actorUserId = defaultUser.id;
-    }
-
-    if (!actorUserId) {
-      return res.status(400).json({ error: 'No se encontró un usuario válido para registrar el movimiento' });
-    }
+    const { tipo_movimiento, naturaleza, categoria, concepto, monto, forma_pago, referencia, fecha_movimiento } = req.body;
+    const actor = await resolveActiveFinancialActor(req);
+    if (!actor) return res.status(401).json({ error: 'Se requiere un usuario activo para registrar el movimiento.' });
 
     if (!tipo_movimiento || !naturaleza || !concepto || !monto) {
       return res.status(400).json({ error: 'Campos requeridos: tipo_movimiento, naturaleza, concepto, monto' });
@@ -527,42 +481,85 @@ export const addMovimientoFinanciero = async (req: Request, res: Response) => {
 
     const normTipo = normalizarTipoMovimiento(tipo_movimiento);
     const normNat = normalizarNaturaleza(naturaleza);
-
-    // Protection against duplicate requests (Idempotency check within 5 seconds)
-    const recentDuplicate = await prisma.movimientoFinanciero.findFirst({
-      where: {
-        expediente_id: id,
-        concepto,
-        monto: Number(monto),
-        fecha_movimiento: { gte: new Date(Date.now() - 5000) }
-      }
-    });
-
-    if (recentDuplicate) {
-      return res.status(200).json(recentDuplicate);
+    const normalizedCategory = normalizeFinancialCategory(categoria);
+    const numericAmount = Number(monto);
+    const movementDate = fecha_movimiento ? new Date(`${fecha_movimiento}T12:00:00`) : new Date();
+    if (Number.isNaN(movementDate.getTime())) {
+      return res.status(400).json({ error: 'La fecha del movimiento no es válida.' });
     }
+    validateMovementSemantics({
+      tipo: normTipo,
+      naturaleza: normNat,
+      categoria: normalizedCategory,
+      monto: numericAmount,
+    });
+    const cleanConcept = String(concepto).trim();
+    const cleanReference = typeof referencia === 'object' ? JSON.stringify(referencia) : String(referencia || '').trim() || null;
 
-    const movimiento = await prisma.movimientoFinanciero.create({
-      data: {
-        expediente_id: id,
-        tipo_movimiento: normTipo,
-        naturaleza: normNat,
-        categoria: categoria || (normNat === 'EGRESO' ? 'TERCEROS' : 'NOTARIA'),
-        concepto,
-        monto: Number(monto),
-        forma_pago: forma_pago || 'TRANSFERENCIA',
-        referencia: typeof referencia === 'object' ? JSON.stringify(referencia) : referencia,
-        capturado_por_id: actorUserId,
-        estatus: 'VALIDADO'
-      }
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:movimiento:${id}`}))`);
+      const expediente = await tx.expediente.findFirst({ where: { id, archived_at: null }, select: { id: true } });
+      if (!expediente) throw new FinancialLedgerError('Expediente activo no encontrado.', 'EXPEDIENTE_NOT_FOUND', 404);
+
+      const recentDuplicate = await tx.movimientoFinanciero.findFirst({
+        where: {
+          expediente_id: id,
+          naturaleza: normNat,
+          categoria: normalizedCategory,
+          concepto: cleanConcept,
+          monto: numericAmount,
+          referencia: cleanReference,
+          fecha_validacion: { gte: new Date(Date.now() - 10_000) },
+        },
+      });
+      if (recentDuplicate) return { movimiento: recentDuplicate, idempotent: true };
+
+      const estatus = normNat === 'INGRESO' ? 'RECIBIDO' : 'VALIDADO';
+      const movimiento = await tx.movimientoFinanciero.create({
+        data: {
+          expediente_id: id,
+          tipo_movimiento: normTipo,
+          naturaleza: normNat,
+          categoria: normalizedCategory,
+          concepto: cleanConcept,
+          monto: numericAmount,
+          fecha_movimiento: movementDate,
+          forma_pago: String(forma_pago || 'TRANSFERENCIA').trim(),
+          referencia: cleanReference,
+          capturado_por_id: actor.id,
+          validado_por_id: actor.id,
+          fecha_validacion: new Date(),
+          estatus,
+        },
+      });
+      await tx.expedienteActividad.create({
+        data: {
+          expediente_id: id,
+          tipo: 'PAGO',
+          titulo: `${normNat === 'INGRESO' ? 'Ingreso recibido' : 'Egreso validado'} (${normalizedCategory})`,
+          descripcion: `${cleanConcept}: $${numericAmount.toFixed(2)} MXN`,
+          usuario_id: actor.id,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          user_id: actor.id,
+          accion: 'CREATE_FINANCIAL_MOVEMENT',
+          entidad: 'MovimientoFinanciero',
+          entidad_id: movimiento.id,
+          valores_nuevos: { expediente_id: id, tipo_movimiento: normTipo, naturaleza: normNat, categoria: normalizedCategory, monto: numericAmount, estatus },
+          correlation_id: (req as any).correlationId,
+        },
+      });
+      return { movimiento, idempotent: false };
     });
 
     await calculateExpedienteProgress(id);
-
-    res.status(201).json(movimiento);
+    res.status(result.idempotent ? 200 : 201).json({ ...result.movimiento, idempotent: result.idempotent });
   } catch (error: any) {
     console.error('[addMovimientoFinanciero] Error:', error);
-    res.status(500).json({
+    const status = error instanceof FinancialLedgerError ? error.status : 500;
+    res.status(status).json({
       error: 'Error al registrar movimiento financiero',
       detail: error.message,
       code: error.code || 'PRISMA_ERROR'
@@ -580,30 +577,22 @@ export const reverseMovimientoFinanciero = async (req: Request, res: Response) =
       return res.status(400).json({ error: 'El motivo de reverso es obligatorio' });
     }
 
-    let actorUserId = (req as any).user?.id || req.body.user_id;
-    if (!actorUserId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) actorUserId = defaultUser.id;
-    }
-
-    if (!actorUserId) {
-      return res.status(400).json({ error: 'No se encontró un usuario válido para la reversión' });
-    }
-
-    const original = await prisma.movimientoFinanciero.findUnique({
-      where: { id: movimientoId }
-    });
-
-    if (!original) {
-      return res.status(404).json({ error: 'Movimiento original no encontrado' });
-    }
-
-    if (original.estatus === 'REVERTIDO') {
-      return res.status(400).json({ error: 'Este movimiento financiero ya fue revertido previamente' });
-    }
+    const actor = await resolveActiveFinancialActor(req);
+    if (!actor) return res.status(401).json({ error: 'Se requiere un usuario activo para revertir el movimiento.' });
 
     const reverso = await prisma.$transaction(async (tx) => {
-      // Crear movimiento de reverso compensatorio
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:movimiento-reverso:${movimientoId}`}))`);
+      const original = await tx.movimientoFinanciero.findFirst({ where: { id: movimientoId, expediente_id: id } });
+      if (!original) throw new FinancialLedgerError('Movimiento original no encontrado.', 'MOVEMENT_NOT_FOUND', 404);
+      if (!['VALIDADO', 'RECIBIDO'].includes(original.estatus)) {
+        throw new FinancialLedgerError('Solo se pueden revertir movimientos activos y validados.', 'MOVEMENT_NOT_REVERSIBLE');
+      }
+      if (original.categoria === 'REVERSO' || original.movimiento_origen_id) {
+        throw new FinancialLedgerError('Un contramovimiento técnico no puede volver a revertirse.', 'TECHNICAL_REVERSE_NOT_REVERSIBLE');
+      }
+      const priorReverse = await tx.movimientoFinanciero.findFirst({ where: { movimiento_origen_id: original.id } });
+      if (priorReverse) throw new FinancialLedgerError('Este movimiento ya tiene un reverso registrado.', 'MOVEMENT_ALREADY_REVERSED', 409);
+
       const rev = await tx.movimientoFinanciero.create({
         data: {
           expediente_id: id,
@@ -612,13 +601,13 @@ export const reverseMovimientoFinanciero = async (req: Request, res: Response) =
           categoria: 'REVERSO',
           concepto: `Reverso de: ${original.concepto}`,
           monto: original.monto,
-          capturado_por_id: actorUserId,
-          validado_por_id: actorUserId,
+          capturado_por_id: actor.id,
+          validado_por_id: actor.id,
           fecha_validacion: new Date(),
           estatus: 'VALIDADO',
           movimiento_origen_id: original.id,
           motivo_reversion,
-          revertido_por_id: actorUserId,
+          revertido_por_id: actor.id,
           fecha_reversion: new Date()
         }
       });
@@ -626,7 +615,7 @@ export const reverseMovimientoFinanciero = async (req: Request, res: Response) =
       // Marcar original como REVERTIDO
       await tx.movimientoFinanciero.update({
         where: { id: original.id },
-        data: { estatus: 'REVERTIDO' }
+        data: { estatus: 'REVERTIDO', motivo_reversion: motivo_reversion.trim(), revertido_por_id: actor.id, fecha_reversion: new Date() }
       });
 
       // Bitácora de actividad
@@ -636,8 +625,19 @@ export const reverseMovimientoFinanciero = async (req: Request, res: Response) =
           tipo: 'AUDITORIA',
           titulo: `Movimiento Financiero Revertido ($${original.monto})`,
           descripcion: `Motivo: ${motivo_reversion}`,
-          usuario_id: actorUserId
+          usuario_id: actor.id
         }
+      });
+      await tx.auditLog.create({
+        data: {
+          user_id: actor.id,
+          accion: 'REVERSE_FINANCIAL_MOVEMENT',
+          entidad: 'MovimientoFinanciero',
+          entidad_id: original.id,
+          valores_anteriores: { estatus: original.estatus, monto: Number(original.monto), naturaleza: original.naturaleza },
+          valores_nuevos: { estatus: 'REVERTIDO', reverso_id: rev.id, motivo: motivo_reversion.trim() },
+          correlation_id: (req as any).correlationId,
+        },
       });
 
       return rev;
@@ -647,7 +647,8 @@ export const reverseMovimientoFinanciero = async (req: Request, res: Response) =
 
     res.json(reverso);
   } catch (error: any) {
-    res.status(500).json({ error: 'Error al revertir movimiento financiero', detail: error.message });
+    const status = error instanceof FinancialLedgerError ? error.status : 500;
+    res.status(status).json({ error: 'Error al revertir movimiento financiero', detail: error.message, code: error.code });
   }
 };
 
@@ -685,116 +686,162 @@ export const updateExpedienteHeader = async (req: Request, res: Response) => {
       notaria_id,
       numero_escritura,
       budget_items,
-      honorarios_pravia
+      honorarios_pravia,
+      version: expectedVersion,
+      user_id,
     } = req.body;
-    
-    const cleanAbogadoId = (abogado_id && String(abogado_id).trim() !== '') ? abogado_id : undefined;
-    const cleanNotariaId = (notaria_id && String(notaria_id).trim() !== '') ? notaria_id : null;
-    let cleanTipoActoId = (tipo_acto_id && String(tipo_acto_id).trim() !== '') ? tipo_acto_id : undefined;
+    const cleanAlias = cliente_alias === undefined ? undefined : String(cliente_alias).trim();
+    const cleanAbogadoId = abogado_id === undefined ? undefined : String(abogado_id).trim();
+    const cleanNotariaId = notaria_id === undefined ? undefined : (notaria_id ? String(notaria_id).trim() : null);
+    const cleanNumeroEscritura = numero_escritura === undefined ? undefined : String(numero_escritura).trim();
 
-    if (!cleanTipoActoId && tipo_acto_nombre) {
-      const matchingTipo = await prisma.tipoActo.findFirst({
-        where: { nombre: { equals: String(tipo_acto_nombre).trim(), mode: 'insensitive' } }
-      });
-      if (matchingTipo) cleanTipoActoId = matchingTipo.id;
+    if (cleanAlias !== undefined && cleanAlias.length === 0) {
+      throw new ExpedienteUpdateError('El alias o identificación del expediente no puede quedar vacío.', 'EXPEDIENTE_ALIAS_REQUIRED');
     }
-    
-    let userId = (req as any).user?.id || cleanAbogadoId;
-    if (!userId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) userId = defaultUser.id;
+    if (cleanAbogadoId !== undefined && cleanAbogadoId.length === 0) {
+      throw new ExpedienteUpdateError('Selecciona un abogado activo para el expediente.', 'EXPEDIENTE_LAWYER_REQUIRED');
     }
 
-    const currentExp = await prisma.expediente.findUnique({ where: { id } });
-    if (!currentExp) return res.status(404).json({ error: 'Expediente no encontrado' });
-
-    const currentDatos = (currentExp.datos_operacion as any) || {};
-    const newDatos = { ...currentDatos };
-
-    if (numero_escritura !== undefined) {
-      newDatos.numero_escritura = numero_escritura;
+    const validatedBudget = Array.isArray(budget_items)
+      ? budget_items.map((item: any, index: number) => {
+          const concepto = String(item?.concepto || '').trim();
+          const monto = Number(item?.monto);
+          if (!concepto) {
+            throw new ExpedienteUpdateError(`El rubro ${index + 1} requiere un nombre.`, 'INVALID_BUDGET_ITEM');
+          }
+          if (!Number.isFinite(monto) || monto < 0) {
+            throw new ExpedienteUpdateError(`El monto de "${concepto}" debe ser un número mayor o igual a cero.`, 'INVALID_BUDGET_AMOUNT');
+          }
+          return { id: item?.id || `rubro_${index + 1}`, concepto, monto };
+        })
+      : undefined;
+    const praviaAmount = honorarios_pravia === undefined ? undefined : Number(honorarios_pravia);
+    if (praviaAmount !== undefined && (!Number.isFinite(praviaAmount) || praviaAmount < 0)) {
+      throw new ExpedienteUpdateError('La participación PRAVIA debe ser un importe válido mayor o igual a cero.', 'INVALID_PRAVIA_AMOUNT');
     }
-
-    let calculatedTotalCliente: number | undefined = undefined;
-
-    if (Array.isArray(budget_items)) {
-      const totalNotaria = budget_items.reduce((sum: number, r: any) => sum + Number(r.monto || 0), 0);
-      const totalPravia = Number(honorarios_pravia || 0);
-      calculatedTotalCliente = totalNotaria + totalPravia;
-
-      newDatos.presupuesto = {
-        rubros: budget_items,
-        honorarios_pravia: totalPravia,
-        total_notaria: totalNotaria,
-        total_cliente: calculatedTotalCliente
-      };
-
-      if (currentExp.cotizacion_id) {
-        const cot = await prisma.cotizacion.findUnique({
-          where: { id: currentExp.cotizacion_id },
-          include: { versiones: { orderBy: { version: 'desc' } } }
-        });
-        if (cot && cot.versiones && cot.versiones.length > 0) {
-          const latestVer = cot.versiones[0];
-          await prisma.cotizacionVersion.update({
-            where: { id: latestVer.id },
-            data: {
-              desglose_notaria: { rubros: budget_items },
-              honorarios_pravia: totalPravia,
-              total_notaria: totalNotaria,
-              total_cliente: calculatedTotalCliente
-            }
-          });
-          await prisma.cotizacion.update({
-            where: { id: cot.id },
-            data: {
-              total_notaria: totalNotaria,
-              honorarios_pravia: totalPravia,
-              total_cliente: calculatedTotalCliente
-            }
-          });
-        }
-      }
-    }
-
-    const changes: string[] = [];
-    if (cliente_alias && cliente_alias !== currentExp.cliente_alias) changes.push(`Nombre de Identificación: "${currentExp.cliente_alias}" → "${cliente_alias}"`);
-    if (cleanTipoActoId && cleanTipoActoId !== currentExp.tipo_acto_id) changes.push(`Tipo de Acto modificado`);
-    if (cleanAbogadoId && cleanAbogadoId !== currentExp.abogado_id) changes.push(`Abogado Encargado reasignado`);
-    if (cleanNotariaId !== currentExp.notaria_id) changes.push(`Notaría modificada`);
-    if (numero_escritura !== undefined) changes.push(`Número de Escritura actualizado`);
-    if (Array.isArray(budget_items)) changes.push(`Presupuesto Operativo actualizado`);
 
     const updated = await prisma.$transaction(async (tx) => {
-      const exp = await tx.expediente.update({
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:expediente-update:${id}`}))`);
+      const currentExp = await tx.expediente.findUnique({ where: { id } });
+      if (!currentExp) throw new ExpedienteUpdateError('Expediente no encontrado.', 'EXPEDIENTE_NOT_FOUND', 404);
+      if (expectedVersion !== undefined && Number(expectedVersion) !== currentExp.version) {
+        throw new ExpedienteUpdateError(
+          'El expediente cambió en otra sesión. Recarga la información antes de volver a guardar.',
+          'EXPEDIENTE_VERSION_CONFLICT',
+          409,
+        );
+      }
+
+      let cleanTipoActoId = tipo_acto_id ? String(tipo_acto_id).trim() : undefined;
+      if (!cleanTipoActoId && tipo_acto_nombre !== undefined) {
+        const matchingTipo = await tx.tipoActo.findFirst({
+          where: { activo: true, nombre: { equals: String(tipo_acto_nombre).trim(), mode: 'insensitive' } },
+        });
+        if (!matchingTipo) {
+          throw new ExpedienteUpdateError('El tipo de acto seleccionado no existe o está inactivo.', 'EXPEDIENTE_ACT_TYPE_INVALID');
+        }
+        cleanTipoActoId = matchingTipo.id;
+      }
+      if (cleanTipoActoId) {
+        const validType = await tx.tipoActo.findFirst({ where: { id: cleanTipoActoId, activo: true }, select: { id: true } });
+        if (!validType) throw new ExpedienteUpdateError('El tipo de acto seleccionado no existe o está inactivo.', 'EXPEDIENTE_ACT_TYPE_INVALID');
+      }
+      if (cleanAbogadoId !== undefined) {
+        const lawyer = await tx.user.findFirst({ where: { id: cleanAbogadoId, activo: true }, select: { id: true } });
+        if (!lawyer) throw new ExpedienteUpdateError('El abogado seleccionado no existe o está inactivo.', 'EXPEDIENTE_LAWYER_INVALID');
+      }
+      if (cleanNotariaId) {
+        const notary = await tx.notaria.findFirst({ where: { id: cleanNotariaId, activa: true }, select: { id: true } });
+        if (!notary) throw new ExpedienteUpdateError('La notaría seleccionada no existe o está inactiva.', 'EXPEDIENTE_NOTARY_INVALID');
+      }
+
+      const actorId = (req as any).user?.id || user_id || cleanAbogadoId || currentExp.abogado_id;
+      const actor = await tx.user.findFirst({ where: { id: actorId, activo: true }, select: { id: true } });
+      if (!actor) throw new ExpedienteUpdateError('No existe un usuario activo para registrar el cambio.', 'EXPEDIENTE_ACTOR_INVALID', 403);
+
+      const currentDatos = (currentExp.datos_operacion as Record<string, any> | null) || {};
+      const newDatos: Record<string, any> = { ...currentDatos };
+      if (cleanNumeroEscritura !== undefined) newDatos.numero_escritura = cleanNumeroEscritura || null;
+
+      if (validatedBudget !== undefined) {
+        const totalNotaria = validatedBudget.reduce((sum, item) => sum + item.monto, 0);
+        const totalPravia = praviaAmount ?? Number((currentDatos.presupuesto as any)?.honorarios_pravia || 0);
+        if (totalNotaria > 0 && totalPravia > totalNotaria) {
+          throw new ExpedienteUpdateError(
+            'La participación PRAVIA no puede exceder el presupuesto notarial.',
+            'PRAVIA_AMOUNT_EXCEEDS_BUDGET',
+          );
+        }
+        newDatos.presupuesto = {
+          rubros: validatedBudget,
+          honorarios_pravia: totalPravia,
+          total_notaria: totalNotaria,
+          total_cliente: totalNotaria,
+        };
+      } else if (praviaAmount !== undefined) {
+        const currentBudget = (currentDatos.presupuesto as any) || {};
+        const totalNotaria = Number(currentBudget.total_notaria || 0);
+        if (totalNotaria > 0 && praviaAmount > totalNotaria) {
+          throw new ExpedienteUpdateError(
+            'La participación PRAVIA no puede exceder el presupuesto notarial.',
+            'PRAVIA_AMOUNT_EXCEEDS_BUDGET',
+          );
+        }
+        newDatos.presupuesto = { ...currentBudget, honorarios_pravia: praviaAmount, total_cliente: totalNotaria };
+      }
+
+      const changes: string[] = [];
+      if (cleanAlias !== undefined && cleanAlias !== currentExp.cliente_alias) changes.push('Alias o identificación');
+      if (cleanTipoActoId && cleanTipoActoId !== currentExp.tipo_acto_id) changes.push('Tipo de acto');
+      if (cleanAbogadoId !== undefined && cleanAbogadoId !== currentExp.abogado_id) changes.push('Abogado encargado');
+      if (cleanNotariaId !== undefined && cleanNotariaId !== currentExp.notaria_id) changes.push('Notaría');
+      if (cleanNumeroEscritura !== undefined && cleanNumeroEscritura !== (currentExp.numero_notaria || '')) changes.push('Número de escritura');
+      if (validatedBudget !== undefined || praviaAmount !== undefined) changes.push('Presupuesto operativo');
+
+      const expediente = await tx.expediente.update({
         where: { id },
         data: {
-          cliente_alias: cliente_alias || undefined,
+          cliente_alias: cleanAlias,
           tipo_acto_id: cleanTipoActoId,
           abogado_id: cleanAbogadoId,
           notaria_id: cleanNotariaId,
-          valor_operacion: calculatedTotalCliente ?? undefined,
-          datos_operacion: newDatos
-        }
+          numero_notaria: cleanNumeroEscritura === undefined ? undefined : (cleanNumeroEscritura || null),
+          datos_operacion: newDatos,
+          version: { increment: 1 },
+        },
       });
 
-      if (changes.length > 0 && userId) {
+      if (changes.length > 0) {
+        const correlationId = (req as any).correlationId || crypto.randomUUID();
         await tx.expedienteActividad.create({
           data: {
             expediente_id: id,
             tipo: 'AUDITORIA',
-            titulo: 'Ficha General y Presupuesto del Expediente Modificados',
-            descripcion: changes.join('; '),
-            usuario_id: userId
-          }
+            titulo: 'Ficha general y presupuesto actualizados',
+            descripcion: changes.join(', '),
+            usuario_id: actor.id,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            user_id: actor.id,
+            accion: 'UPDATE_HEADER_AND_BUDGET',
+            entidad: 'Expediente',
+            entidad_id: id,
+            valores_anteriores: { version: currentExp.version },
+            valores_nuevos: { version: expediente.version, campos: changes },
+            correlation_id: correlationId,
+          },
         });
       }
-
-      return exp;
+      return expediente;
     });
 
     res.json(updated);
   } catch (error: any) {
+    if (error instanceof ExpedienteUpdateError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
     res.status(500).json({ error: 'Error al actualizar expediente', detail: error.message });
   }
 };
@@ -831,7 +878,14 @@ export const addExpedienteDocumento = async (req: Request, res: Response) => {
 
     const originalName = file.originalname;
     const carpetaTarget = carpeta || 'Administrativo';
-    const categoriaTarget = categoria || 'PROYECTO';
+    const categoriaTarget = String(categoria || 'PROYECTO').toUpperCase();
+    if (!Object.values(DocCategoria).includes(categoriaTarget as DocCategoria)) {
+      return res.status(400).json({
+        code: 'INVALID_DOCUMENT_CATEGORY',
+        error: 'La categoría documental no es válida.',
+        allowed_categories: Object.values(DocCategoria),
+      });
+    }
 
     // 1. Supabase es el almacenamiento canónico; no duplicar cada carga en disco local.
     const fileBuffer = file.buffer || (file.path && fs.existsSync(file.path) ? fs.readFileSync(file.path) : null);
@@ -862,7 +916,7 @@ export const addExpedienteDocumento = async (req: Request, res: Response) => {
             nombre_interno: storageKeyFinal,
             storage_key: storageKeyFinal,
             tipo: categoriaTarget,
-            categoria: categoriaTarget,
+            categoria: categoriaTarget as DocCategoria,
             mime_type: file.mimetype,
             size_bytes: file.size,
             subido_por_id: userId,
@@ -1225,87 +1279,23 @@ export const downloadExpedienteDocumento = async (req: Request, res: Response) =
   }
 };
 
-// 12. Eliminar Operativamente Movimiento Financiero (Sin motivo obligatorio, sin contramovimientos)
-export const deleteMovimientoFinanciero = async (req: Request, res: Response) => {
-  try {
-    const { id, movimientoId } = req.params;
-    let userId = (req as any).user?.id || req.body?.user_id;
-
-    if (!userId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) userId = defaultUser.id;
-    }
-
-    const mov = await prisma.movimientoFinanciero.findUnique({
-      where: { id: movimientoId }
-    });
-
-    if (!mov) {
-      return res.status(404).json({
-        success: false,
-        error: 'Movimiento no encontrado',
-        detail: `No existe el movimiento con ID ${movimientoId}`
-      });
-    }
-
-    // Marca estatus como CANCELADO (desaparece de la vista y totales, sin motivo obligatorio)
-    await prisma.$transaction(async (tx) => {
-      await tx.movimientoFinanciero.update({
-        where: { id: movimientoId },
-        data: {
-          estatus: 'CANCELADO',
-          revertido_por_id: userId,
-          fecha_reversion: new Date()
-        }
-      });
-
-      if (userId) {
-        await tx.expedienteActividad.create({
-          data: {
-            expediente_id: id,
-            tipo: 'AUDITORIA',
-            titulo: `Movimiento Financiero Eliminado ($${mov.monto})`,
-            descripcion: `Eliminación operativa de "${mov.concepto}" ($${mov.monto})`,
-            usuario_id: userId
-          }
-        });
-      }
-    });
-
-    await calculateExpedienteProgress(id);
-
-    return res.status(200).json({
-      success: true,
-      message: 'Movimiento eliminado exitosamente'
-    });
-  } catch (error: any) {
-    console.error('[deleteMovimientoFinanciero] Error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Error al eliminar movimiento financiero',
-      detail: error.message
-    });
-  }
-};
-
-// 13. Administrar Adjuntos Específicos por Movimiento (Comprobante, Factura PDF, Factura XML)
+// 12. Administrar Adjuntos Específicos por Movimiento (Comprobante, Factura PDF, Factura XML)
 export const updateMovimientoAdjunto = async (req: Request, res: Response) => {
   try {
     const { id, movimientoId } = req.params;
     const { tipo_adjunto, accion } = req.body;
 
-    if (accion !== 'ELIMINAR') {
+    if (accion !== 'ARCHIVAR') {
       return res.status(400).json({
         error: 'Acción no válida',
-        detail: 'Para cargar o sustituir adjuntos debe enviarse el archivo binario al endpoint de carga.'
+        detail: 'Los adjuntos solo pueden archivarse o sustituirse; nunca se eliminan físicamente.'
       });
     }
-
-    let userId = (req as any).user?.id || req.body.user_id;
-    if (!userId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) userId = defaultUser.id;
+    if (!['COMPROBANTE', 'FACTURA_PDF', 'FACTURA_XML'].includes(tipo_adjunto)) {
+      return res.status(400).json({ error: 'Tipo de adjunto no válido' });
     }
+    const actor = await resolveActiveFinancialActor(req);
+    if (!actor) return res.status(401).json({ error: 'Se requiere un usuario activo para archivar el adjunto.' });
 
     const mov = await prisma.movimientoFinanciero.findFirst({
       where: { id: movimientoId, expediente_id: id }
@@ -1324,69 +1314,68 @@ export const updateMovimientoAdjunto = async (req: Request, res: Response) => {
       currentRefData = { nota: mov.referencia };
     }
 
-    const updateData: any = {};
-    let accionDesc = '';
-    let storageKeyToDelete: string | null = null;
+    const updateData: Prisma.MovimientoFinancieroUpdateInput = {};
 
     if (tipo_adjunto === 'COMPROBANTE') {
-      storageKeyToDelete = currentRefData.comprobante_file || mov.comprobante_url || null;
       updateData.comprobante_url = null;
       currentRefData.comprobante_nombre = null;
       currentRefData.comprobante_file = null;
       currentRefData.comprobante_mime = null;
       currentRefData.comprobante_size = null;
-      accionDesc = 'Eliminado Comprobante de Pago';
     } else if (tipo_adjunto === 'FACTURA_PDF') {
-      storageKeyToDelete = currentRefData.factura_pdf_file || mov.factura_url || null;
       updateData.factura_url = null;
       currentRefData.factura_pdf_nombre = null;
       currentRefData.factura_pdf_file = null;
       currentRefData.factura_pdf_mime = null;
       currentRefData.factura_pdf_size = null;
-      accionDesc = 'Eliminada Factura PDF';
     } else if (tipo_adjunto === 'FACTURA_XML') {
-      storageKeyToDelete = currentRefData.factura_xml_file || currentRefData.factura_xml_url || null;
       currentRefData.factura_xml_url = null;
       currentRefData.factura_xml_nombre = null;
       currentRefData.factura_xml_file = null;
       currentRefData.factura_xml_mime = null;
       currentRefData.factura_xml_size = null;
-      accionDesc = 'Eliminada Factura XML';
-    } else {
-      return res.status(400).json({ error: 'Tipo de adjunto no válido' });
     }
 
     updateData.referencia = JSON.stringify(currentRefData);
 
     const updatedMov = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:movimiento-adjunto:${movimientoId}:${tipo_adjunto}`}))`);
+      await tx.movimientoDocumento.updateMany({
+        where: { movimiento_id: movimientoId, tipo_vinculo: tipo_adjunto, estatus: 'ACTIVO' },
+        data: {
+          estatus: 'INACTIVO',
+          inactivado_at: new Date(),
+          inactivado_por_id: actor.id,
+          motivo_inactivacion: 'Archivado desde el expediente',
+        },
+      });
       const result = await tx.movimientoFinanciero.update({
         where: { id: movimientoId },
         data: updateData
       });
 
-      if (userId) {
-        await tx.expedienteActividad.create({
-          data: {
-            expediente_id: id,
-            tipo: 'DOCUMENTO',
-            titulo: `Adjunto Financiero (${tipo_adjunto})`,
-            descripcion: `Acción: ${accionDesc} en movimiento "${mov.concepto}" ($${mov.monto})`,
-            usuario_id: userId
-          }
-        });
-      }
+      await tx.expedienteActividad.create({
+        data: {
+          expediente_id: id,
+          tipo: 'DOCUMENTO',
+          titulo: `Adjunto financiero archivado (${tipo_adjunto})`,
+          descripcion: `El archivo dejó de ser vigente en "${mov.concepto}"; su historial fue conservado.`,
+          usuario_id: actor.id,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          user_id: actor.id,
+          accion: 'ARCHIVE_FINANCIAL_ATTACHMENT',
+          entidad: 'MovimientoFinanciero',
+          entidad_id: movimientoId,
+          valores_nuevos: { expediente_id: id, tipo_adjunto, almacenamiento_conservado: true },
+          correlation_id: (req as any).correlationId,
+        },
+      });
 
       return result;
     });
-
-    if (storageKeyToDelete) {
-      if (storageKeyToDelete.startsWith('finanzas/')) {
-        await deleteFile(storageKeyToDelete).catch(() => {});
-      } else {
-        const localPath = path.join(FINANZAS_DIR, path.basename(storageKeyToDelete));
-        if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
-      }
-    }
 
     res.json({ success: true, movimiento: updatedMov });
   } catch (error: any) {
@@ -1428,10 +1417,26 @@ export const uploadMovimientoAdjuntoFile = async (req: Request, res: Response) =
       return res.status(400).json({ error: 'No se recibió ningún archivo' });
     }
 
-    let userId = (req as any).user?.id || req.body.user_id;
-    if (!userId) {
-      const defaultUser = await prisma.user.findFirst();
-      if (defaultUser) userId = defaultUser.id;
+    const actor = await resolveActiveFinancialActor(req);
+    if (!actor) return res.status(401).json({ error: 'Se requiere un usuario activo para cargar el adjunto.' });
+
+    const acceptedFiles: Record<string, { mime: string[]; extensions: string[]; documentType: string }> = {
+      COMPROBANTE: {
+        mime: ['application/pdf', 'image/jpeg', 'image/png'],
+        extensions: ['.pdf', '.jpg', '.jpeg', '.png'],
+        documentType: 'COMPROBANTE_PAGO',
+      },
+      FACTURA_PDF: { mime: ['application/pdf'], extensions: ['.pdf'], documentType: 'FACTURA_PDF' },
+      FACTURA_XML: {
+        mime: ['application/xml', 'text/xml', 'application/octet-stream'],
+        extensions: ['.xml'],
+        documentType: 'FACTURA_XML',
+      },
+    };
+    const attachmentRule = acceptedFiles[tipo_adjunto];
+    const extension = path.extname(file.originalname).toLowerCase();
+    if (!attachmentRule || !attachmentRule.extensions.includes(extension) || !attachmentRule.mime.includes(file.mimetype)) {
+      return res.status(400).json({ error: 'El tipo o formato del archivo no es válido para este adjunto.' });
     }
 
     const mov = await prisma.movimientoFinanciero.findFirst({
@@ -1454,12 +1459,10 @@ export const uploadMovimientoAdjuntoFile = async (req: Request, res: Response) =
     uploadedStorageKey = `finanzas/${id}/${movimientoId}/${Date.now()}_${cleanName}`;
     await uploadFile(file.buffer, uploadedStorageKey, file.mimetype);
 
-    let updateData: any = {};
+    const updateData: Prisma.MovimientoFinancieroUpdateInput = {};
     let accionDesc = '';
-    let previousStorageKey: string | null = null;
 
     if (tipo_adjunto === 'COMPROBANTE') {
-      previousStorageKey = currentRefData.comprobante_file || mov.comprobante_url || null;
       updateData.comprobante_url = uploadedStorageKey;
       currentRefData.comprobante_nombre = file.originalname;
       currentRefData.comprobante_file = uploadedStorageKey;
@@ -1467,7 +1470,6 @@ export const uploadMovimientoAdjuntoFile = async (req: Request, res: Response) =
       currentRefData.comprobante_size = file.size;
       accionDesc = `Cargado/Sustituido Comprobante de Pago (${file.originalname})`;
     } else if (tipo_adjunto === 'FACTURA_PDF') {
-      previousStorageKey = currentRefData.factura_pdf_file || mov.factura_url || null;
       updateData.factura_url = uploadedStorageKey;
       currentRefData.factura_pdf_nombre = file.originalname;
       currentRefData.factura_pdf_file = uploadedStorageKey;
@@ -1475,7 +1477,6 @@ export const uploadMovimientoAdjuntoFile = async (req: Request, res: Response) =
       currentRefData.factura_pdf_size = file.size;
       accionDesc = `Cargada/Sustituida Factura PDF (${file.originalname})`;
     } else if (tipo_adjunto === 'FACTURA_XML') {
-      previousStorageKey = currentRefData.factura_xml_file || currentRefData.factura_xml_url || null;
       currentRefData.factura_xml_nombre = file.originalname;
       currentRefData.factura_xml_file = uploadedStorageKey;
       currentRefData.factura_xml_url = uploadedStorageKey;
@@ -1490,35 +1491,70 @@ export const uploadMovimientoAdjuntoFile = async (req: Request, res: Response) =
     updateData.referencia = JSON.stringify(currentRefData);
 
     const updatedMov = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:movimiento-adjunto:${movimientoId}:${tipo_adjunto}`}))`);
+      await tx.movimientoDocumento.updateMany({
+        where: { movimiento_id: movimientoId, tipo_vinculo: tipo_adjunto, estatus: 'ACTIVO' },
+        data: {
+          estatus: 'SUSTITUIDO',
+          inactivado_at: new Date(),
+          inactivado_por_id: actor.id,
+          motivo_inactivacion: `Sustituido por ${file.originalname}`,
+        },
+      });
+      const document = await tx.documento.create({
+        data: {
+          nombre_original: file.originalname,
+          nombre_interno: uploadedStorageKey!,
+          tipo: attachmentRule.documentType,
+          categoria: 'OTROS',
+          storage_key: uploadedStorageKey!,
+          mime_type: file.mimetype,
+          size_bytes: file.size,
+          estatus: 'VIGENTE',
+          subido_por_id: actor.id,
+          expediente_id: id,
+          observaciones: `Adjunto ${tipo_adjunto} del movimiento ${movimientoId}`,
+        },
+      });
+      await tx.movimientoDocumento.create({
+        data: {
+          movimiento_id: movimientoId,
+          documento_id: document.id,
+          tipo_vinculo: tipo_adjunto,
+          creado_por_id: actor.id,
+          estatus: 'ACTIVO',
+          observaciones: accionDesc,
+        },
+      });
       const result = await tx.movimientoFinanciero.update({
         where: { id: movimientoId },
         data: updateData
       });
 
-      if (userId) {
-        await tx.expedienteActividad.create({
-          data: {
-            expediente_id: id,
-            tipo: 'DOCUMENTO',
-            titulo: `Adjunto Financiero (${tipo_adjunto})`,
-            descripcion: `${accionDesc} en movimiento "${mov.concepto}" ($${mov.monto})`,
-            usuario_id: userId
-          }
-        });
-      }
+      await tx.expedienteActividad.create({
+        data: {
+          expediente_id: id,
+          tipo: 'DOCUMENTO',
+          titulo: `Adjunto financiero vigente (${tipo_adjunto})`,
+          descripcion: `${accionDesc} en movimiento "${mov.concepto}" ($${mov.monto})`,
+          usuario_id: actor.id,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          user_id: actor.id,
+          accion: 'UPLOAD_FINANCIAL_ATTACHMENT',
+          entidad: 'Documento',
+          entidad_id: document.id,
+          valores_nuevos: { movimiento_id: movimientoId, expediente_id: id, tipo_adjunto, storage_key: uploadedStorageKey },
+          correlation_id: (req as any).correlationId,
+        },
+      });
 
       return result;
     });
 
-    if (previousStorageKey && previousStorageKey !== uploadedStorageKey) {
-      if (previousStorageKey.startsWith('finanzas/')) {
-        await deleteFile(previousStorageKey).catch(() => {});
-      } else {
-        const previousLocalPath = path.join(FINANZAS_DIR, path.basename(previousStorageKey));
-        if (fs.existsSync(previousLocalPath)) fs.unlinkSync(previousLocalPath);
-      }
-    }
-
+    uploadedStorageKey = null;
     res.json(updatedMov);
   } catch (error: any) {
     if (uploadedStorageKey) await deleteFile(uploadedStorageKey).catch(() => {});

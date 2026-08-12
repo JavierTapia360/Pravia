@@ -14,6 +14,7 @@ export interface Prospecto {
   estado: string;
   created_at: string;
   atendido_por?: { nombre: string };
+  cotizacion?: { id: string; estado: string } | null;
   seguimientos?: Seguimiento[];
 }
 

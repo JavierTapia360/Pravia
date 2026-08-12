@@ -1,9 +1,15 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { ComparecienteService } from '../services/compareciente.service';
+import prisma from '../config/prisma';
 
-const prisma = new PrismaClient();
 const comparecienteService = new ComparecienteService(prisma);
+
+async function resolveActiveActor(req: Request, suppliedId?: string) {
+  const requestedId = (req as any).user?.id || suppliedId;
+  return requestedId
+    ? prisma.user.findFirst({ where: { id: requestedId, activo: true }, select: { id: true } })
+    : prisma.user.findFirst({ where: { activo: true }, orderBy: { created_at: 'asc' }, select: { id: true } });
+}
 
 export class ComparecienteController {
   public static async buscarDuplicados(req: Request, res: Response) {
@@ -41,20 +47,20 @@ export class ComparecienteController {
       const data = await comparecienteService.obtenerPorId(id);
       return res.status(200).json({ success: true, data });
     } catch (err: any) {
-      return res.status(440).json({ success: false, error: err.message });
+      return res.status(404).json({ success: false, error: err.message });
     }
   }
 
   public static async crearPersonaFisica(req: Request, res: Response) {
     try {
-      const actorUserId = (req as any).user?.id || req.body.creado_por_id;
-      if (!actorUserId) {
+      const actor = await resolveActiveActor(req, req.body.creado_por_id);
+      if (!actor) {
         return res.status(401).json({ success: false, error: 'Usuario autenticado requerido' });
       }
 
       const result = await comparecienteService.crearPersonaFisica({
         ...req.body,
-        creado_por_id: actorUserId
+        creado_por_id: actor.id
       });
       return res.status(201).json({ success: true, data: result });
     } catch (err: any) {
@@ -64,14 +70,14 @@ export class ComparecienteController {
 
   public static async crearPersonaMoral(req: Request, res: Response) {
     try {
-      const actorUserId = (req as any).user?.id || req.body.creado_por_id;
-      if (!actorUserId) {
+      const actor = await resolveActiveActor(req, req.body.creado_por_id);
+      if (!actor) {
         return res.status(401).json({ success: false, error: 'Usuario autenticado requerido' });
       }
 
       const result = await comparecienteService.crearPersonaMoral({
         ...req.body,
-        creado_por_id: actorUserId
+        creado_por_id: actor.id
       });
       return res.status(201).json({ success: true, data: result });
     } catch (err: any) {
@@ -81,15 +87,33 @@ export class ComparecienteController {
 
   public static async vincularAExpediente(req: Request, res: Response) {
     try {
-      const actorUserId = (req as any).user?.id || req.body.creado_por_id;
-      if (!actorUserId) {
+      const actor = await resolveActiveActor(req, req.body.creado_por_id);
+      if (!actor) {
         return res.status(401).json({ success: false, error: 'Usuario autenticado requerido' });
       }
 
       const vinculo = await comparecienteService.vincularAExpediente({
         ...req.body,
-        creado_por_id: actorUserId
+        creado_por_id: actor.id
       });
+      return res.status(200).json({ success: true, data: vinculo });
+    } catch (err: any) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  }
+
+  public static async validarVinculoExpediente(req: Request, res: Response) {
+    try {
+      const actor = await resolveActiveActor(req, req.body.creado_por_id);
+      if (!actor) return res.status(401).json({ success: false, error: 'Usuario autenticado requerido' });
+      if (typeof req.body.datos_validados !== 'boolean') {
+        return res.status(400).json({ success: false, code: 'VALIDATION_STATUS_REQUIRED', error: 'Indica si los datos fueron validados.' });
+      }
+      const vinculo = await comparecienteService.validarVinculoExpediente(
+        req.params.vinculoId,
+        actor.id,
+        req.body.datos_validados,
+      );
       return res.status(200).json({ success: true, data: vinculo });
     } catch (err: any) {
       return res.status(400).json({ success: false, error: err.message });
@@ -99,8 +123,9 @@ export class ComparecienteController {
   public static async desvincularDeExpediente(req: Request, res: Response) {
     try {
       const { vinculoId } = req.params;
-      const actorUserId = (req as any).user?.id || req.body.creado_por_id || 'system';
-      const actualizado = await comparecienteService.desvincularDeExpediente(vinculoId, actorUserId);
+      const actor = await resolveActiveActor(req, req.body.creado_por_id);
+      if (!actor) return res.status(401).json({ success: false, error: 'Usuario autenticado requerido' });
+      const actualizado = await comparecienteService.desvincularDeExpediente(vinculoId, actor.id);
       return res.status(200).json({ success: true, data: actualizado });
     } catch (err: any) {
       return res.status(400).json({ success: false, error: err.message });
@@ -139,39 +164,43 @@ export class ComparecienteController {
     try {
       const { id } = req.params;
       const file = req.file;
-      const userId = (req as any).user?.id || req.body.usuario_id || '00000000-0000-0000-0000-000000000001';
+      const actor = await resolveActiveActor(req, req.body.usuario_id);
       const categoria = req.body.categoria || 'OTROS';
 
       if (!file) {
         return res.status(400).json({ success: false, error: 'No se recibió archivo' });
       }
+      if (!actor) return res.status(401).json({ success: false, error: 'Usuario autenticado requerido' });
 
       const result = await comparecienteService.agregarDocumentoMaster({
         comparecienteId: id,
-        userId,
+        userId: actor.id,
         buffer: file.buffer,
         fileName: file.originalname,
         mimeType: file.mimetype,
-        categoria
+        categoria,
+        fechaEmision: req.body.fecha_emision,
+        fechaVencimiento: req.body.fecha_vencimiento,
+        observaciones: req.body.observaciones,
       });
 
       return res.status(201).json({ success: true, data: result });
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(400).json({ success: false, error: err.message });
     }
   }
 
   public static async archivarCompareciente(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const usuario_id = (req as any).user?.id || req.body.usuario_id || '00000000-0000-0000-0000-000000000001';
-      const { modo, motivo } = req.body;
+      const actor = await resolveActiveActor(req, req.body.usuario_id);
+      const { motivo } = req.body;
+      if (!actor) return res.status(401).json({ success: false, error: 'Usuario autenticado requerido' });
 
       const result = await comparecienteService.archivarCompareciente({
         id,
-        usuario_id,
-        motivo: motivo || 'Sin motivo especificado',
-        modo: modo === 'ELIMINAR' ? 'ELIMINAR' : 'ARCHIVAR'
+        usuario_id: actor.id,
+        motivo: motivo || 'Sin motivo especificado'
       });
 
       return res.status(200).json({ success: true, data: result });

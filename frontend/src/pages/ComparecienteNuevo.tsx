@@ -108,6 +108,7 @@ export default function ComparecienteNuevo() {
     modelo?: string;
     resumen?: string;
     alertas?: string[];
+    conflictos?: Array<{ campo: string; alternativas: Array<{ valor: string; fuente: string }> }>;
   } | null>(null);
 
   const [iaStatus, setIaStatus] = useState<{
@@ -125,7 +126,7 @@ export default function ComparecienteNuevo() {
   }, []);
 
   const [guardando, setGuardando] = useState(false);
-  const [feedbackMsg, setFeedbackMsg] = useState<{ tipo: 'success' | 'error'; texto: string } | null>(null);
+  const [feedbackMsg, setFeedbackMsg] = useState<{ tipo: 'success' | 'info' | 'error'; texto: string } | null>(null);
   const [modalConfirmacion, setModalConfirmacion] = useState<{
     comparecienteId: string;
     docsIntegrados: number;
@@ -793,12 +794,15 @@ export default function ComparecienteNuevo() {
         setCamposExtraidosIA(detectados);
         setResumenIA({
           proveedor: resIA.proveedor || 'OpenAI',
-          modelo: resIA.modelo || 'gpt-5-mini',
+          modelo: resIA.modelo || 'gpt-5.4-nano',
           resumen: resIA.resumen_ejecutivo || 'Extracción documental procesada correctamente.',
-          alertas: resIA.alertas
+          alertas: resIA.alertas,
+          conflictos: data.conflictos || []
         });
 
-        setFeedbackMsg({ tipo: 'success', texto: 'Información extraída y prellenada con éxito por IA.' });
+        setFeedbackMsg(data.conflictos?.length
+          ? { tipo: 'info', texto: `La extracción encontró ${data.conflictos.length} conflicto(s). Revísalos antes de guardar.` }
+          : { tipo: 'success', texto: 'Información extraída y prellenada con éxito por IA.' });
       } else {
         const errorMsg = data.error || data.message || 'No fue posible ejecutar la extracción documental con IA. Los campos permanecen sin cambios.';
         setErrorIA(errorMsg);
@@ -1030,7 +1034,9 @@ export default function ComparecienteNuevo() {
           className={`p-4 rounded-xl border flex items-center gap-3 text-sm ${
             feedbackMsg.tipo === 'success'
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-              : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+              : feedbackMsg.tipo === 'info'
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
           }`}
         >
           {feedbackMsg.tipo === 'success' ? (
@@ -1303,6 +1309,17 @@ export default function ComparecienteNuevo() {
                   <span className="text-[10px] text-slate-400">{resumenIA.proveedor}</span>
                 </div>
                 <p className="text-slate-300">{resumenIA.resumen}</p>
+                {Boolean(resumenIA.conflictos?.length) && (
+                  <div className="mt-3 space-y-2 rounded-lg border border-rose-500/30 bg-rose-950/20 p-3">
+                    <p className="flex items-center gap-2 font-semibold text-rose-300"><AlertTriangle className="h-4 w-4" />Conflictos que requieren decisión humana</p>
+                    {resumenIA.conflictos?.map((conflicto) => (
+                      <div key={conflicto.campo} className="border-t border-rose-500/20 pt-2 text-[11px] text-rose-100">
+                        <strong className="uppercase">{conflicto.campo.replace(/_/g, ' ')}</strong>
+                        <ul className="mt-1 space-y-1">{conflicto.alternativas.map((item, index) => <li key={`${item.fuente}-${index}`}>{item.valor} · {item.fuente}</li>)}</ul>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

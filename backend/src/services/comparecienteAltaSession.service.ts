@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import path from 'path';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { uploadFile, deleteFile, downloadFile } from './supabase.service';
 import {
@@ -7,10 +8,14 @@ import {
   curpToFechaNacimiento,
   extraerFolioIneMrz,
   autoridadPorTipoDocumento,
+  getOpenAIModelName,
   DocumentExtractionResult,
   DomicilioDetectado,
   DocumentoParaExtraccion
 } from './openaiDocument.service';
+import { validateCurp, validateOptionalDate, validateRfc } from '../domain/mexicanIdentity';
+import { consolidateExtractedFields } from '../domain/documentExtraction';
+import { recordAIFailure, recordAIUsages } from './aiUsage.service';
 
 const EXPIRATION_HOURS = parseInt(process.env.COMPARECIENTE_ALTA_EXPIRATION_HOURS || '24', 10);
 
@@ -187,7 +192,7 @@ export class ComparecienteAltaSessionService {
 
     let finalUsuarioId = sesion.usuario_id;
     if (usuarioId) {
-      const u = await prisma.user.findUnique({ where: { id: usuarioId } });
+      const u = await prisma.user.findFirst({ where: { id: usuarioId, activo: true } });
       if (u) finalUsuarioId = u.id;
     }
 
@@ -344,25 +349,36 @@ export class ComparecienteAltaSessionService {
 
     // ── 2. LLAMADA ÚNICA A OPENAI CON TODOS LOS DOCUMENTOS ───────────────────
     // Si falla, el error se propaga sin fallback
-    const resultadoIA = await extraerMultiplesDocumentos(documentosParaIA);
+    const aiStartedAt = Date.now();
+    let resultadoIA: DocumentExtractionResult;
+    try {
+      resultadoIA = await extraerMultiplesDocumentos(documentosParaIA);
+      await recordAIUsages(resultadoIA.usos || (resultadoIA.uso ? [resultadoIA.uso] : []), {
+        operacion: 'EXTRACCION_COMPARECIENTE',
+        usuarioId: sesion.usuario_id,
+        expedienteId: sesion.origen_expediente_id,
+        altaSessionId: sesion.id,
+        escalamientoMotivo: 'Lectura dudosa o contradicción entre documentos',
+        metadata: { documentos_solicitados: documentosParaIA.map((item) => item.documentoId) },
+      }).catch((usageError) => console.error('[AI usage] No fue posible registrar el consumo:', usageError.message));
+    } catch (error: any) {
+      await recordAIFailure({
+        operacion: 'EXTRACCION_COMPARECIENTE',
+        modelo: getOpenAIModelName(),
+        usuarioId: sesion.usuario_id,
+        expedienteId: sesion.origen_expediente_id,
+        altaSessionId: sesion.id,
+        durationMs: Date.now() - aiStartedAt,
+        errorCode: error.code || 'AI_EXTRACTION_FAILED',
+      }).catch(() => undefined);
+      await prisma.comparecienteAltaSession.update({ where: { id: sessionId }, data: { estatus: 'FALLIDO' } });
+      throw error;
+    }
 
     // ── 3. CONSOLIDAR CAMPOS CON TRAZABILIDAD ─────────────────────────────────
-    const camposCombinados: Record<string, any> = {};
-    const propuestaRespuesta: Record<string, any> = {};
-
-    for (const field of resultadoIA.campos) {
-      if (field.valor && field.valor.trim() !== '') {
-        const cleanVal = field.valor.trim();
-        camposCombinados[field.campo] = cleanVal;
-        propuestaRespuesta[field.campo] = {
-          valor: cleanVal,
-          fuente: field.fuente || 'OpenAI',
-          documento_id: field.documento_id || '',
-          confianza: field.confianza,
-          estado: 'DETECTADO'
-        };
-      }
-    }
+    const consolidacion = consolidateExtractedFields(resultadoIA.campos);
+    const camposCombinados: Record<string, any> = { ...consolidacion.values };
+    const propuestaRespuesta: Record<string, any> = { ...consolidacion.proposals };
 
     // ── 4. DERIVAR FECHA DE NACIMIENTO DESDE CURP si no viene del documento ──
     if (!camposCombinados.fecha_nacimiento && camposCombinados.curp) {
@@ -453,6 +469,7 @@ export class ComparecienteAltaSessionService {
     const domIdent = domiciliosIdentificacion[0] || null;
 
     const borradorLimpio = { ...(sesion.borrador_json as any) || {} };
+    for (const conflicto of consolidacion.conflicts) delete borradorLimpio[conflicto.campo];
     // Limpiar únicamente campos no acreditables documentalmente salvo que vengan de IA
     delete borradorLimpio.tratamiento;
     delete borradorLimpio.aliases;
@@ -516,8 +533,12 @@ export class ComparecienteAltaSessionService {
       regimenes: resultadoIA.regimenes || [],
       _ia_resumen: resultadoIA.resumen_ejecutivo || `Extracción completada sobre ${documentosParaIA.length} documentos.`,
       _ia_alertas: resultadoIA.alertas || [],
+      _ia_conflictos: consolidacion.conflicts,
+      _ia_propuesta: propuestaRespuesta,
       _ia_proveedor: resultadoIA.proveedor,
-      _ia_modelo: resultadoIA.modelo
+      _ia_modelo: resultadoIA.modelo,
+      _ia_uso: resultadoIA.uso || null,
+      _ia_usos: resultadoIA.usos || (resultadoIA.uso ? [resultadoIA.uso] : []),
     };
 
     await prisma.comparecienteAltaSession.update({
@@ -543,6 +564,7 @@ export class ComparecienteAltaSessionService {
       errores: erroresCarga,
       sesion_id: sessionId,
       propuesta: propuestaRespuesta,
+      conflictos: consolidacion.conflicts,
       domicilios_detectados: resultadoIA.domicilios_detectados || [],
       resultado: {
         proveedor: resultadoIA.proveedor,
@@ -550,7 +572,9 @@ export class ComparecienteAltaSessionService {
         tipo_persona_detectado: resultadoIA.tipo_persona_detectado || 'FISICA',
         resumen_ejecutivo: resultadoIA.resumen_ejecutivo || '',
         alertas: resultadoIA.alertas || [],
-        campos: resultadoIA.campos
+        campos: resultadoIA.campos,
+        uso: resultadoIA.uso || null,
+        usos: resultadoIA.usos || (resultadoIA.uso ? [resultadoIA.uso] : []),
       },
       borrador_actualizado: borradorMejorado
     };
@@ -649,8 +673,36 @@ export class ComparecienteAltaSessionService {
 
     const esFisica = tipo_persona === 'FISICA';
     const nombreCompleto = esFisica ? `${nombre || ''} ${apellido_paterno || ''} ${apellido_materno || ''}`.trim() : (razon_social || '');
+    if (!nombreCompleto) throw new Error(esFisica ? 'El nombre de la persona física es obligatorio.' : 'La razón social es obligatoria.');
+    const cleanCurp = esFisica ? validateCurp(curp) : null;
+    const cleanRfc = validateRfc(rfc, esFisica ? 'FISICA' : 'MORAL');
+    const birthDate = esFisica ? validateOptionalDate(fecha_nacimiento, 'La fecha de nacimiento') : null;
+    const incorporationDate = !esFisica ? validateOptionalDate(fecha_constitucion, 'La fecha de constitución') : null;
 
     return await prisma.$transaction(async (tx) => {
+      const identityKey = cleanCurp || cleanRfc || nombreCompleto.toUpperCase();
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:compareciente:${identityKey}`}))`);
+      const duplicate = esFisica
+        ? await tx.personaFisica.findFirst({
+            where: {
+              archived_at: null,
+              OR: [
+                ...(cleanCurp ? [{ curp: { equals: cleanCurp, mode: 'insensitive' as const } }] : []),
+                ...(cleanRfc ? [{ rfc: { equals: cleanRfc, mode: 'insensitive' as const } }] : []),
+              ],
+            },
+            select: { compareciente_id: true },
+          })
+        : cleanRfc
+          ? await tx.personaMoral.findFirst({
+              where: { archived_at: null, rfc: { equals: cleanRfc, mode: 'insensitive' } },
+              select: { compareciente_id: true },
+            })
+          : null;
+      if (duplicate) {
+        throw new Error(`Ya existe un compareciente con el mismo identificador (${duplicate.compareciente_id}). Vincula el registro existente.`);
+      }
+
       // 1. Crear Compareciente Maestro
       const compareciente = await tx.compareciente.create({
         data: {
@@ -668,20 +720,24 @@ export class ComparecienteAltaSessionService {
         await tx.personaFisica.create({
           data: {
             compareciente_id: compareciente.id,
-            nombre: nombre || 'Sin nombre',
+            nombre,
             apellido_paterno: apellido_paterno || null,
             apellido_materno: apellido_materno || null,
             nombre_completo_calculado: nombreCompleto,
             sexo: sexoNormalizado,
-            fecha_nacimiento: fecha_nacimiento ? new Date(fecha_nacimiento) : null,
+            fecha_nacimiento: birthDate,
             lugar_nacimiento: lugar_nacimiento || null,
+            pais_nacimiento: pais_nacimiento || null,
             nacionalidad: nacionalidad || 'Mexicana',
-            curp: curp || null,
-            rfc: rfc || null,
+            curp: cleanCurp,
+            rfc: cleanRfc,
             estado_civil: estado_civil || null,
             regimen_matrimonial: estado_civil === 'CASADO' ? regimen_matrimonial : null,
+            escolaridad: escolaridad || null,
             ocupacion: ocupacion || null,
             actividad_economica: actividad_economica || null,
+            giro: giro || null,
+            pep: pep_estado === 'SI',
             pep_estado: pep_estado || 'PENDIENTE',
             relacion_pep: pep_estado === 'SI' ? relacion_pep : null
           }
@@ -691,15 +747,37 @@ export class ComparecienteAltaSessionService {
         await tx.personaMoral.create({
           data: {
             compareciente_id: compareciente.id,
-            razon_social: razon_social || 'Sin Razón Social',
+            razon_social,
             nombre_comercial: nombre_comercial || null,
             tipo_societario: tipo_societario || null,
-            rfc: rfc || null,
+            rfc: cleanRfc,
             nacionalidad: nacionalidad_moral || 'Mexicana',
-            fecha_constitucion: fecha_constitucion ? new Date(fecha_constitucion) : null,
+            fecha_constitucion: incorporationDate,
             duracion: duracion_moral || 'Indefinida',
             objeto_social_resumido: objeto_social_resumido || null
           }
+        });
+      }
+
+      for (const [index, alias] of (Array.isArray(aliases) ? aliases : []).map((value: unknown) => String(value).trim()).filter(Boolean).entries()) {
+        await tx.comparecienteAlias.create({
+          data: { compareciente_id: compareciente.id, alias, principal: index === 0 },
+        });
+      }
+
+      const contactValues = [
+        telefono ? { tipo: 'TELEFONO' as const, valor: String(telefono).trim() } : null,
+        correo ? { tipo: 'CORREO' as const, valor: String(correo).trim().toLowerCase() } : null,
+      ].filter((value): value is { tipo: 'TELEFONO' | 'CORREO'; valor: string } => Boolean(value?.valor));
+      for (const [index, contact] of contactValues.entries()) {
+        await tx.comparecienteContacto.create({
+          data: {
+            compareciente_id: compareciente.id,
+            tipo: contact.tipo,
+            valor: contact.valor,
+            principal: index === 0,
+            creado_por_id: finalUsuarioId,
+          },
         });
       }
 
@@ -743,6 +821,7 @@ export class ComparecienteAltaSessionService {
             estado: partEstado || null,
             pais: partPais || 'México',
             referencia: partRef || null,
+            comprobado: Boolean(partDoc),
             principal: true,
             creado_por_id: finalUsuarioId
           }
@@ -764,6 +843,7 @@ export class ComparecienteAltaSessionService {
             estado: dom_fiscal_estado || null,
             pais: dom_fiscal_pais || 'México',
             referencia: dom_fiscal_referencias || null,
+            comprobado: Boolean(dom_fiscal_documento),
             principal: !creoParticular,
             creado_por_id: finalUsuarioId
           }
@@ -795,6 +875,7 @@ export class ComparecienteAltaSessionService {
               municipio: d.municipio || null,
               estado: d.estado || null,
               pais: d.pais || 'México',
+              comprobado: d.tipo_sugerido === 'COMPROBADO',
               principal: i === 0,
               creado_por_id: finalUsuarioId
             }
@@ -804,12 +885,12 @@ export class ComparecienteAltaSessionService {
 
 
       // 5. Crear Identificación Oficial si se proporcionó folio o tipo
-      if (folio_identificacion || tipo_identificacion) {
+      if (folio_identificacion) {
         await tx.comparecienteIdentificacion.create({
           data: {
             compareciente_id: compareciente.id,
             tipo_identificacion: tipo_identificacion || 'INE',
-            numero: folio_identificacion || 'SIN_FOLIO',
+            numero: folio_identificacion,
             autoridad_emisora: autoridad_emisora || null,
             pais_emisor: pais_emisor || 'México',
             fecha_expedicion: fecha_expedicion_identificacion ? new Date(fecha_expedicion_identificacion) : null,
@@ -822,6 +903,7 @@ export class ComparecienteAltaSessionService {
 
       // 6. Integrar documentos temporales seleccionados al Archivo Documental definitivo
       let docsIntegradosCount = 0;
+      const documentosDefinitivos = new Map<string, string>();
       if (Array.isArray(documentosIntegrarIds) && documentosIntegrarIds.length > 0) {
         const temporalesIntegrar = await tx.cargaTemporalDocumento.findMany({
           where: {
@@ -853,6 +935,7 @@ export class ComparecienteAltaSessionService {
               creado_por_id: finalUsuarioId
             }
           });
+          documentosDefinitivos.set(tempDoc.id, docMaestro.id);
 
           await tx.cargaTemporalDocumento.update({
             where: { id: tempDoc.id },
@@ -863,7 +946,72 @@ export class ComparecienteAltaSessionService {
         }
       }
 
-      // 7. Marcar sesión como COMPLETADA
+      // 7. Conservar la procedencia de cada propuesta, incluso si fue corregida o quedó en conflicto.
+      const borradorIA = (sesion.borrador_json as any) || {};
+      const propuestaIA = borradorIA._ia_propuesta && typeof borradorIA._ia_propuesta === 'object'
+        ? borradorIA._ia_propuesta as Record<string, any>
+        : {};
+      const cargasSesion = new Set(sesion.cargasTemporales.map((item) => item.id));
+      const normalizeSourceValue = (value: unknown) => String(value ?? '').trim().toUpperCase().replace(/\s+/g, ' ');
+      for (const [campo, propuesta] of Object.entries(propuestaIA)) {
+        const alternatives = propuesta?.estado === 'EN_CONFLICTO' && Array.isArray(propuesta.alternativas)
+          ? propuesta.alternativas
+          : [propuesta];
+        for (const alternative of alternatives) {
+          const tempId = cargasSesion.has(alternative?.documento_id) ? alternative.documento_id : null;
+          const detected = alternative?.valor === undefined ? null : String(alternative.valor);
+          const confirmed = datosFormulario[campo] === undefined ? null : String(datosFormulario[campo]);
+          const sourceState = propuesta?.estado === 'EN_CONFLICTO'
+            ? confirmed === null || confirmed.trim() === ''
+              ? 'EN_CONFLICTO'
+              : normalizeSourceValue(confirmed) === normalizeSourceValue(detected)
+                ? 'CONFIRMADO'
+                : 'DESCARTADO'
+            : confirmed === null || confirmed.trim() === ''
+              ? 'DESCARTADO'
+              : normalizeSourceValue(confirmed) === normalizeSourceValue(detected)
+                ? 'CONFIRMADO'
+                : 'EDITADO_MANUALMENTE';
+          await tx.comparecienteDatoFuente.create({
+            data: {
+              compareciente_id: compareciente.id,
+              campo,
+              entidad_destino: esFisica ? 'PersonaFisica' : 'PersonaMoral',
+              valor_detectado: detected,
+              valor_confirmado: sourceState === 'EN_CONFLICTO' ? null : confirmed,
+              documento_id: tempId ? documentosDefinitivos.get(tempId) || null : null,
+              carga_temporal_id: tempId,
+              proveedor_ia: borradorIA._ia_proveedor || 'OpenAI',
+              modelo_ia: borradorIA._ia_modelo || null,
+              confianza: alternative?.confianza || null,
+              estado: sourceState as any,
+              confirmado_por_id: sourceState === 'CONFIRMADO' || sourceState === 'EDITADO_MANUALMENTE' ? finalUsuarioId : null,
+              confirmado_at: sourceState === 'CONFIRMADO' || sourceState === 'EDITADO_MANUALMENTE' ? new Date() : null,
+              correlation_id: sesion.correlation_id,
+            },
+          });
+        }
+        const confirmedConflictValue = datosFormulario[campo] === undefined ? '' : String(datosFormulario[campo]).trim();
+        const matchesAlternative = alternatives.some((alternative: any) => normalizeSourceValue(alternative?.valor) === normalizeSourceValue(confirmedConflictValue));
+        if (propuesta?.estado === 'EN_CONFLICTO' && confirmedConflictValue && !matchesAlternative) {
+          await tx.comparecienteDatoFuente.create({
+            data: {
+              compareciente_id: compareciente.id,
+              campo,
+              entidad_destino: esFisica ? 'PersonaFisica' : 'PersonaMoral',
+              valor_confirmado: confirmedConflictValue,
+              proveedor_ia: borradorIA._ia_proveedor || 'OpenAI',
+              modelo_ia: borradorIA._ia_modelo || null,
+              estado: 'EDITADO_MANUALMENTE',
+              confirmado_por_id: finalUsuarioId,
+              confirmado_at: new Date(),
+              correlation_id: sesion.correlation_id,
+            },
+          });
+        }
+      }
+
+      // 8. Marcar sesión como COMPLETADA
       await tx.comparecienteAltaSession.update({
         where: { id: sessionId },
         data: {

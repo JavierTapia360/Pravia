@@ -7,12 +7,13 @@ interface WizardCotizacionProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  initialProspectoId?: string | null;
 }
 
 // ─────────────────────────────────────────────────────
 // MAIN WIZARD COMPONENT
 // ─────────────────────────────────────────────────────
-export default function WizardCotizacion({ isOpen, onClose, onSuccess }: WizardCotizacionProps) {
+export default function WizardCotizacion({ isOpen, onClose, onSuccess, initialProspectoId }: WizardCotizacionProps) {
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -200,13 +201,13 @@ export default function WizardCotizacion({ isOpen, onClose, onSuccess }: WizardC
           minHeight: 0
         }}>
           {submitError && (
-            <div className="badge badge-danger" style={{ width: '100%', padding: 'var(--space-3)', marginBottom: 'var(--space-4)', fontSize: '0.85rem', borderRadius: 'var(--radius-md)' }}>
-              ❌ {submitError}
+            <div className="badge badge-danger" role="alert" style={{ width: '100%', padding: 'var(--space-3)', marginBottom: 'var(--space-4)', fontSize: '0.85rem', borderRadius: 'var(--radius-md)' }}>
+              <AlertTriangle size={15} aria-hidden="true" /> {submitError}
             </div>
           )}
 
           {currentStep === 1 && (
-            <Step1Prospecto selected={selectedProspecto} onSelect={setSelectedProspecto} />
+            <Step1Prospecto selected={selectedProspecto} onSelect={setSelectedProspecto} initialProspectoId={initialProspectoId} />
           )}
           {currentStep === 2 && (
             <Step2Notaria selected={selectedNotaria} onSelect={setSelectedNotaria} />
@@ -284,7 +285,7 @@ export default function WizardCotizacion({ isOpen, onClose, onSuccess }: WizardC
 // ─────────────────────────────────────────────────────
 // STEP 1 — Seleccionar Prospecto (Grid 2 Columnas con Resumen)
 // ─────────────────────────────────────────────────────
-function Step1Prospecto({ selected, onSelect }: { selected: any, onSelect: (p: any) => void }) {
+function Step1Prospecto({ selected, onSelect, initialProspectoId }: { selected: any, onSelect: (p: any) => void, initialProspectoId?: string | null }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [prospectos, setProspectos] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -293,9 +294,13 @@ function Step1Prospecto({ selected, onSelect }: { selected: any, onSelect: (p: a
     api.get('/prospectos')
       .then((data: any) => {
         const active = (Array.isArray(data) ? data : data.data || []).filter(
-          (p: any) => p.estado !== 'ARCHIVADO' && p.estado !== 'EXPEDIENTE_CREADO'
+          (p: any) => p.estado !== 'ARCHIVADO' && p.estado !== 'EXPEDIENTE_CREADO' && !p.cotizacion
         );
         setProspectos(active);
+        if (initialProspectoId && !selected) {
+          const initial = active.find((prospect: any) => prospect.id === initialProspectoId);
+          if (initial) onSelect(initial);
+        }
       })
       .catch(() => setProspectos([]))
       .finally(() => setIsLoading(false));
@@ -349,7 +354,6 @@ function Step1Prospecto({ selected, onSelect }: { selected: any, onSelect: (p: a
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
               {filtered.map((p: any) => {
-                const hasActive = p.cotizacion && !['RECHAZADA', 'VENCIDA', 'CONVERTIDA_EXPEDIENTE'].includes(p.cotizacion.estado);
                 const isSel = selected?.id === p.id;
                 return (
                   <div
@@ -377,11 +381,6 @@ function Step1Prospecto({ selected, onSelect }: { selected: any, onSelect: (p: a
                       <div><span style={{ color: 'var(--text-muted)' }}>Docs:</span> {p.documentos?.length || 0}</div>
                     </div>
 
-                    {hasActive && (
-                      <div className="badge badge-warning" style={{ marginTop: 'var(--space-2)', width: '100%', justifyContent: 'flex-start' }}>
-                        ⚠️ Este prospecto ya tiene una cotización en proceso
-                      </div>
-                    )}
                   </div>
                 );
               })}

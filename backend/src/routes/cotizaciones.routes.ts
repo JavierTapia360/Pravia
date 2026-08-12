@@ -1,6 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import { 
+import {
   getCotizaciones, 
   getCotizacionById, 
   createCotizacion, 
@@ -17,6 +17,7 @@ import {
   getCotizacionDocumentos,
   unlinkCotizacionDocumento
 } from '../controllers/cotizaciones.controller';
+import { requirePermission } from '../middleware/auth.middleware';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -28,13 +29,13 @@ router.put('/:id/estado', updateCotizacionEstado);
 router.post('/:id/versiones', createCotizacionVersion);
 router.post('/version/:versionId/aprobar', aprobarVersion);
 router.post('/extraer-presupuesto', upload.single('archivo'), extractPresupuesto);
-router.post('/:id/anticipo', registrarAnticipo);
-router.post('/pago/:pagoId/validar', validarAnticipo);
-router.post('/:id/convertir', convertToExpediente);
+router.post('/:id/anticipo', requirePermission('finanzas.write'), registrarAnticipo);
+router.post('/pago/:pagoId/validar', requirePermission('finanzas.validate'), validarAnticipo);
+router.post('/:id/convertir', requirePermission('expedientes.write'), convertToExpediente);
 router.get('/:id/seguimientos', getCotizacionSeguimientos);
 router.post('/:id/seguimientos', createCotizacionSeguimiento);
-router.put('/:id/participacion-pravia', updateParticipacionPravia);
-router.patch('/:id/participacion-pravia', updateParticipacionPravia);
+router.put('/:id/participacion-pravia', requirePermission('finanzas.write'), updateParticipacionPravia);
+router.patch('/:id/participacion-pravia', requirePermission('finanzas.write'), updateParticipacionPravia);
 
 // Documentos de Cotización (Heredados de Prospecto + Subidos en Cotización)
 router.get('/:id/documentos', getCotizacionDocumentos);

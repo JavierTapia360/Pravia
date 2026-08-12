@@ -16,6 +16,7 @@ import { ProyectoEscrituraIA } from '../components/expedientes/ProyectoEscritura
 import { ModalNuevoCompareciente } from '../components/comparecientes/ModalNuevoCompareciente';
 import { ModalVincularCompareciente } from '../components/comparecientes/ModalVincularCompareciente';
 import { ExpedienteFinanzasTab } from '../components/expedientes/ExpedienteFinanzasTab';
+import { ExpedienteWorkflowPanel } from '../components/expedientes/ExpedienteWorkflowPanel';
 
 const CONCEPTOS_CATALOGO = [
   'Honorarios de la notaría',
@@ -28,18 +29,6 @@ const CONCEPTOS_CATALOGO = [
   'Gastos de gestoría',
   'IVA',
   'Otros gastos'
-];
-
-const TIPOS_ACTO_CATALOGO = [
-  'Compraventa Inmobiliaria',
-  'Fideicomiso',
-  'Donación',
-  'Subdivisión de Predios',
-  'Fusión de Inmuebles',
-  'Adjudicación Hereditaria',
-  'Constitución de Hipoteca',
-  'Cancelación de Hipoteca',
-  'Poder Notarial'
 ];
 
 const PLANTILLAS_CARPETAS_POR_ACTO: Record<string, string[]> = {
@@ -90,10 +79,12 @@ export default function ExpedienteDetail() {
   // Catalogs
   const [abogadosList, setAbogadosList] = useState<any[]>([]);
   const [notariasList, setNotariasList] = useState<any[]>([]);
+  const [tiposActoList, setTiposActoList] = useState<any[]>([]);
 
   // Compareciente Modals State
   const [showVincularModal, setShowVincularModal] = useState(false);
   const [showNuevoCompModal, setShowNuevoCompModal] = useState(false);
+  const [validatingLinkId, setValidatingLinkId] = useState<string | null>(null);
 
   // Direct Editable Header State
   const [nombreIdentificacion, setNombreIdentificacion] = useState('');
@@ -212,14 +203,18 @@ export default function ExpedienteDetail() {
 
   const loadCatalogs = async () => {
     try {
-      const usersRes = await api.get('/users').catch(() => []);
+      const [usersRes, notariasRes, tiposRes] = await Promise.all([
+        api.get('/users').catch(() => []),
+        api.get('/notarias').catch(() => []),
+        api.get('/expedientes/tipos-acto').catch(() => []),
+      ]);
       setAbogadosList(Array.isArray(usersRes) ? usersRes : []);
-
-      const notariasRes = await api.get('/notarias').catch(() => []);
       setNotariasList(Array.isArray(notariasRes) ? notariasRes : []);
+      setTiposActoList(Array.isArray(tiposRes) ? tiposRes : []);
     } catch (e) {
       setAbogadosList([]);
       setNotariasList([]);
+      setTiposActoList([]);
     }
   };
 
@@ -244,17 +239,36 @@ export default function ExpedienteDetail() {
 
   const exp = selectedExpediente;
 
+  const handleValidateCompareciente = async (vinculo: any) => {
+    const next = !vinculo.datos_validados;
+    const accepted = window.confirm(next
+      ? 'Confirma que revisaste la ficha y documentos de identidad de este compareciente.'
+      : 'La validación volverá a quedar pendiente. ¿Deseas continuar?');
+    if (!accepted) return;
+    setValidatingLinkId(vinculo.id);
+    try {
+      await api.patch(`/comparecientes/vincular-expediente/${vinculo.id}/validacion`, { datos_validados: next });
+      addToast(next ? 'Datos del compareciente validados.' : 'Validación reabierta.', 'success');
+      await loadData();
+    } catch (error: any) {
+      addToast(error.detail || error.message || 'No fue posible actualizar la validación.', 'error');
+    } finally {
+      setValidatingLinkId(null);
+    }
+  };
+
   useEffect(() => {
     if (exp) {
-      const actNombre = exp.tipo_acto?.nombre || 'Compraventa Inmobiliaria';
-      const templateFolders = PLANTILLAS_CARPETAS_POR_ACTO[actNombre] || PLANTILLAS_CARPETAS_POR_ACTO['Compraventa Inmobiliaria'];
+      if (isDirty) return;
+      const actNombre = exp.tipo_acto?.nombre || '';
+      const templateFolders = PLANTILLAS_CARPETAS_POR_ACTO[actNombre] || ['Administrativo', 'Otros'];
       setCarpetas(templateFolders);
 
       const cot = exp.cotizacion as any;
       const datosOps = (exp.datos_operacion as any) || {};
 
       let rubrosEncontrados: NotariaRubro[] = [];
-      let honorariosPraviaEncontrados = 15000;
+      let honorariosPraviaEncontrados = 0;
 
       if (datosOps.presupuesto && Array.isArray(datosOps.presupuesto.rubros)) {
         rubrosEncontrados = datosOps.presupuesto.rubros.map((r: any, idx: number) => ({
@@ -277,25 +291,10 @@ export default function ExpedienteDetail() {
         if (v.honorarios_pravia !== undefined) honorariosPraviaEncontrados = Number(v.honorarios_pravia);
       }
 
-      if (rubrosEncontrados.length === 0) {
-        rubrosEncontrados = [
-          { id: '1', concepto: 'Avalúo', monto: 6850.00 },
-          { id: '2', concepto: 'Certificados', monto: 4000.00 },
-          { id: '3', concepto: 'Derechos de Registro', monto: 15000.00 },
-          { id: '4', concepto: 'Nayarit - Costo de la Forma de ISABI', monto: 500.00 },
-          { id: '5', concepto: 'Segundo Aviso Preventivo', monto: 1000.00 },
-          { id: '6', concepto: 'Transmisiones Patrimoniales', monto: 703.81 },
-          { id: '7', concepto: 'Folios', monto: 1850.00 },
-          { id: '8', concepto: 'Honorarios', monto: 20000.00 },
-          { id: '9', concepto: 'Honorarios Adjudicación', monto: 8000.00 },
-          { id: '10', concepto: 'IVA', monto: 4776.00 }
-        ];
-      }
-
       const init = {
         cliente_alias: exp.cliente_alias || '',
         tipo_acto_nombre: actNombre,
-        numero_escritura: exp.numero_escritura || datosOps.numero_escritura || '',
+        numero_escritura: exp.numero_notaria || datosOps.numero_escritura || '',
         abogado_id: exp.abogado_id || '',
         notaria_id: exp.notaria_id || '',
         budgetItems: JSON.parse(JSON.stringify(rubrosEncontrados)),
@@ -317,7 +316,7 @@ export default function ExpedienteDetail() {
 
   useEffect(() => {
     if (tipoActoNombre) {
-      const template = PLANTILLAS_CARPETAS_POR_ACTO[tipoActoNombre] || PLANTILLAS_CARPETAS_POR_ACTO['Compraventa Inmobiliaria'];
+      const template = PLANTILLAS_CARPETAS_POR_ACTO[tipoActoNombre] || ['Administrativo', 'Otros'];
       setCarpetas(template);
     }
   }, [tipoActoNombre]);
@@ -373,6 +372,26 @@ export default function ExpedienteDetail() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
+  // Intercepta navegación interna por enlaces del shell mientras esta pantalla conserva cambios.
+  useEffect(() => {
+    if (!isDirty) return;
+    const handleDocumentNavigation = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = event.target as Element | null;
+      const anchor = target?.closest('a[href]') as HTMLAnchorElement | null;
+      if (!anchor || anchor.target === '_blank' || anchor.origin !== window.location.origin) return;
+      const destination = `${anchor.pathname}${anchor.search}${anchor.hash}`;
+      const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      if (destination === current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setPendingNavigation(destination);
+      setShowUnsavedModal(true);
+    };
+    document.addEventListener('click', handleDocumentNavigation, true);
+    return () => document.removeEventListener('click', handleDocumentNavigation, true);
+  }, [isDirty]);
+
   const handleSafeNavigation = (targetPath: string) => {
     if (isDirty) {
       setPendingNavigation(targetPath);
@@ -388,8 +407,8 @@ export default function ExpedienteDetail() {
     if (pendingNavigation) navigate(pendingNavigation);
   };
 
-  const handleSaveHeaderEdits = async () => {
-    if (!exp || !isDirty || isSavingChanges) return;
+  const handleSaveHeaderEdits = async (): Promise<boolean> => {
+    if (!exp || !isDirty || isSavingChanges) return false;
     setIsSavingChanges(true);
     try {
       const parsedPraviaInput = Number(praviaMontoInput);
@@ -402,7 +421,8 @@ export default function ExpedienteDetail() {
         abogado_id: abogadoId || null,
         notaria_id: notariaId || null,
         budget_items: budgetItems,
-        honorarios_pravia: parsedPravia
+        honorarios_pravia: parsedPravia,
+        version: exp.version,
       };
 
       const res = await api.patch(`/expedientes/${exp.id}`, payload);
@@ -427,11 +447,17 @@ export default function ExpedienteDetail() {
       setInitialHeaderState(newBaseline);
       setIsDirty(false);
 
-      await loadData();
+      try {
+        await loadData();
+      } catch {
+        addToast('Los cambios se guardaron, pero no fue posible recargar el expediente.', 'warning');
+      }
+      return true;
     } catch (err: any) {
       console.error('[EXPEDIENTE_SAVE_ERROR]', err);
       const exactMsg = err.detail || err.message || 'Error al guardar cambios en el expediente';
       addToast(exactMsg, 'error');
+      return false;
     } finally {
       setIsSavingChanges(false);
     }
@@ -458,6 +484,7 @@ export default function ExpedienteDetail() {
       const formData = new FormData();
       formData.append('file', proyectoFileToUpload);
       if (proyectoNotaVersion) formData.append('nota_version', proyectoNotaVersion);
+      formData.append('usuario_id', abogadoId || exp.abogado_id);
 
       const res = await fetch(`/api/expedientes/${exp.id}/proyecto/upload`, {
         method: 'POST',
@@ -480,7 +507,8 @@ export default function ExpedienteDetail() {
     if (!exp) return;
     try {
       await api.patch(`/expedientes/${exp.id}/proyecto/versions/${verId}`, {
-        accion: 'RESTAURAR_VIGENTE'
+        accion: 'RESTAURAR_VIGENTE',
+        usuario_id: abogadoId || exp.abogado_id,
       });
       addToast(`Versión V${verNum} restaurada como Proyecto Vigente`, 'success');
       await loadProyectoData();
@@ -865,7 +893,7 @@ export default function ExpedienteDetail() {
     );
   }
 
-  const folioHumano = exp.numero_pravia ? exp.numero_pravia.replace('EXP-', '').split('-').reverse().join('-') : '01-2026';
+  const folioHumano = exp.numero_pravia ? exp.numero_pravia.replace('EXP-', '').split('-').reverse().join('-') : 'Sin folio';
   const tipoActoNombreActual = exp.tipo_acto?.nombre || tipoActoNombre;
 
   const getDocCarpeta = (doc: any): string => {
@@ -946,7 +974,7 @@ export default function ExpedienteDetail() {
           {exp.cotizacion_id && (
             <button
               type="button"
-              onClick={() => navigate('/cotizaciones')}
+              onClick={() => handleSafeNavigation('/cotizaciones')}
               className="text-xs font-semibold text-sky-400 hover:text-sky-300 flex items-center gap-1 bg-sky-500/10 px-3 py-1 rounded-lg border border-sky-500/20"
             >
               <span>Ver cotización de origen{exp.cotizacion?.numero_cotizacion ? ` (${exp.cotizacion.numero_cotizacion})` : ''}</span>
@@ -1042,8 +1070,12 @@ export default function ExpedienteDetail() {
               onChange={(e) => setTipoActoNombre(e.target.value)}
               className="w-full bg-slate-900 border border-white/20 rounded-lg px-2 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-gold cursor-pointer"
             >
-              {TIPOS_ACTO_CATALOGO.map((t) => (
-                <option key={t} value={t}>{t}</option>
+              {!tipoActoNombre && <option value="">Seleccionar tipo de acto</option>}
+              {tipoActoNombre && !tiposActoList.some((tipo) => tipo.nombre === tipoActoNombre) && (
+                <option value={tipoActoNombre}>{tipoActoNombre} (actual)</option>
+              )}
+              {tiposActoList.map((tipo) => (
+                <option key={tipo.id} value={tipo.nombre}>{tipo.nombre}</option>
               ))}
             </select>
           </div>
@@ -1099,7 +1131,7 @@ export default function ExpedienteDetail() {
               onChange={(e) => setNotariaId(e.target.value)}
               className="w-full bg-slate-900 border border-white/20 rounded-lg px-2 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-gold cursor-pointer"
             >
-              <option value="">Notaría No. 1 (Predeterminada)</option>
+              <option value="">Sin notaría asignada</option>
               {notariasList.map((n) => (
                 <option key={n.id} value={n.id}>{n.nombre}</option>
               ))}
@@ -1107,6 +1139,70 @@ export default function ExpedienteDetail() {
           </div>
         </div>
       </div>
+
+      <section aria-label="Progreso y siguiente acción" className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-4">
+        <div className="bg-slate-900/90 border border-white/10 rounded-2xl p-5 shadow-xl">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-sm font-extrabold text-white">Progreso del expediente</h2>
+              <p className="text-xs text-slate-400 mt-0.5">Avance calculado a partir de requisitos y operación registrados.</p>
+            </div>
+            <span className="text-xs font-bold text-gold">{Math.max(0, Math.min(100, exp.avance_general || 0))}% general</span>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {[
+              ['Documental', exp.avance_documental],
+              ['Operativo', exp.avance_operativo],
+              ['Financiero', exp.avance_financiero],
+              ['General', exp.avance_general],
+            ].map(([label, rawValue]) => {
+              const value = Math.max(0, Math.min(100, Number(rawValue || 0)));
+              return (
+                <div key={String(label)} className="rounded-xl border border-white/10 bg-slate-950/60 p-3">
+                  <div className="flex items-center justify-between text-[11px] mb-2">
+                    <span className="font-bold text-slate-300">{label}</span>
+                    <span className="font-mono text-white">{value}%</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                    <div className="h-full rounded-full bg-gold" style={{ width: `${value}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="bg-slate-900/90 border border-white/10 rounded-2xl p-5 shadow-xl grid grid-cols-2 gap-3 text-xs">
+          <div className="col-span-2">
+            <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Siguiente acción</span>
+            <p className="font-bold text-white mt-1">{exp.proxima_accion || 'Sin siguiente acción registrada'}</p>
+          </div>
+          <div>
+            <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Etapa</span>
+            <p className="font-semibold text-slate-200 mt-1">{exp.etapa_actual_nombre || 'Sin etapa activa'}</p>
+          </div>
+          <div>
+            <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Fecha límite</span>
+            <p className="font-semibold text-slate-200 mt-1">
+              {exp.fecha_limite_accion ? new Date(exp.fecha_limite_accion).toLocaleDateString('es-MX') : 'Sin fecha límite'}
+            </p>
+          </div>
+          <div>
+            <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Gestor</span>
+            <p className="font-semibold text-slate-200 mt-1">{exp.gestor ? `${exp.gestor.nombre} ${exp.gestor.apellido}` : 'Sin asignar'}</p>
+          </div>
+          <div>
+            <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Subtipo</span>
+            <p className="font-semibold text-slate-200 mt-1">{exp.subtipo_acto || 'Sin subtipo'}</p>
+          </div>
+        </div>
+      </section>
+
+      <ExpedienteWorkflowPanel
+        expediente={exp}
+        actorUserId={abogadoId || exp.abogado_id || ''}
+        onUpdated={loadData}
+      />
 
       {/* 2. NAVEGACIÓN PRINCIPAL POR PESTAÑAS */}
       <div className="bg-slate-900/90 border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
@@ -1209,7 +1305,7 @@ export default function ExpedienteDetail() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => navigate(`/comparecientes/nuevo?expedienteId=${exp.id}`)}
+                    onClick={() => handleSafeNavigation(`/comparecientes/nuevo?expedienteId=${exp.id}`)}
                     className="px-4 py-2 rounded-xl bg-gold hover:bg-gold-light text-slate-950 text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"
                   >
                     <Plus size={14} /> + Crear Nuevo Compareciente
@@ -1265,10 +1361,19 @@ export default function ExpedienteDetail() {
                         )}
                       </div>
 
-                      <div className="pt-2 flex justify-end border-t border-white/10">
+                      <div className="pt-2 flex flex-wrap justify-end gap-2 border-t border-white/10">
                         <button
                           type="button"
-                          onClick={() => navigate(`/comparecientes/${persona.id}?fromExpediente=${exp.id}`)}
+                          onClick={() => handleValidateCompareciente(vinculo)}
+                          disabled={validatingLinkId === vinculo.id}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border flex items-center gap-1 disabled:opacity-40 ${vinculo.datos_validados ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30'}`}
+                        >
+                          {validatingLinkId === vinculo.id ? <RefreshCw size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
+                          {vinculo.datos_validados ? 'Reabrir revisión' : 'Confirmar revisión'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSafeNavigation(`/comparecientes/${persona.id}?fromExpediente=${exp.id}`)}
                           disabled={!persona.id}
                           className="px-3 py-1.5 rounded-lg bg-gold/10 hover:bg-gold/20 text-gold text-xs font-bold border border-gold/30 flex items-center gap-1 disabled:opacity-40"
                         >
@@ -1537,6 +1642,11 @@ export default function ExpedienteDetail() {
                   </div>
 
                   <div className="space-y-2.5 max-h-[440px] overflow-y-auto pr-1">
+                    {budgetItems.length === 0 && (
+                      <div className="rounded-xl border border-dashed border-white/15 p-6 text-center text-xs text-slate-400">
+                        No hay rubros operativos registrados. Agrega el primero desde el catálogo inferior.
+                      </div>
+                    )}
                     {budgetItems.map((item) => (
                       <div key={item.id} className="flex items-center gap-3">
                         <input 
@@ -1554,9 +1664,10 @@ export default function ExpedienteDetail() {
                         <button 
                           type="button"
                           onClick={() => handleRemoveItem(item.id)}
+                          aria-label={`Eliminar rubro ${item.concepto}`}
                           className="text-slate-400 hover:text-rose-400 p-2 text-xs font-bold transition-colors"
                         >
-                          ✕
+                          <X size={15} aria-hidden="true" />
                         </button>
                       </div>
                     ))}
@@ -1607,7 +1718,11 @@ export default function ExpedienteDetail() {
 
           {/* PESTAÑA: FINANZAS Y MOVIMIENTOS RECONSTRUIDA */}
           {activeTab === 'finanzas' && (
-            <ExpedienteFinanzasTab expedienteId={exp.id} onUpdate={loadData} />
+            <ExpedienteFinanzasTab
+              expedienteId={exp.id}
+              actorUserId={abogadoId || exp.abogado_id || ''}
+              onUpdate={loadData}
+            />
           )}
 
           {/* PESTAÑA: BITÁCORA */}
@@ -1873,9 +1988,11 @@ export default function ExpedienteDetail() {
               <button
                 type="button"
                 onClick={async () => {
-                  setShowUnsavedModal(false);
-                  await handleSaveHeaderEdits();
-                  if (pendingNavigation) navigate(pendingNavigation);
+                  const saved = await handleSaveHeaderEdits();
+                  if (saved) {
+                    setShowUnsavedModal(false);
+                    if (pendingNavigation) navigate(pendingNavigation);
+                  }
                 }}
                 className="px-4 py-2 bg-gold hover:bg-gold-light text-slate-950 font-bold text-xs rounded-xl shadow-md cursor-pointer"
               >

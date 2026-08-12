@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import prisma from '../config/prisma';
 
 export interface CalculatedProgress {
   documental: number;
@@ -7,10 +8,8 @@ export interface CalculatedProgress {
   general: number;
 }
 
-const defaultPrisma = new PrismaClient();
-
 export async function calculateExpedienteProgress(expedienteId: string, tx?: Prisma.TransactionClient | PrismaClient) {
-  const client = tx || defaultPrisma;
+  const client = tx || prisma;
   return ExpedienteProgressService.calcularAvances(client, expedienteId);
 }
 

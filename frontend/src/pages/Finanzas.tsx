@@ -26,7 +26,7 @@ import {
   ChevronRight,
   Download
 } from 'lucide-react';
-import { useAuthStore } from '../App';
+import { useAuthStore } from '../stores/authStore';
 import {
   finanzasService,
   KPIFinancieroGlobal,
@@ -67,6 +67,9 @@ export default function Finanzas() {
     pendiente_cobro: 0,
     egresos_realizados: 0,
     pendiente_pago: 0,
+    saldo_terceros: 0,
+    fondos_retenidos: 0,
+    utilidad_pravia: 0,
     participacion_pravia: 0,
     total_presupuestado_general: 0
   });
@@ -391,7 +394,7 @@ export default function Finanzas() {
       {activeTab === 'resumen' && (
         <div className="space-y-8">
           
-          {/* TABLERO SUPERIOR CON LOS 8 INDICADORES GLOBALES */}
+          {/* TABLERO SUPERIOR CON INDICADORES CONTABLES SEPARADOS */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             
             {/* 1. Honorarios Esperados */}
@@ -401,6 +404,30 @@ export default function Finanzas() {
                 {formatCurrency(kpis.honorarios_esperados)}
               </p>
               <p className="text-[11px] text-slate-500">Operaciones aceptadas / activas</p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white border border-cyan-200 shadow-sm space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-700">Saldo a Terceros</span>
+              <p className="text-xl font-black text-cyan-900 truncate" title={formatCurrency(kpis.saldo_terceros)}>
+                {formatCurrency(kpis.saldo_terceros)}
+              </p>
+              <p className="text-[11px] text-slate-500">Notaría, impuestos y proveedores por cubrir</p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white border border-violet-200 shadow-sm space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700">Fondos Retenidos</span>
+              <p className="text-xl font-black text-violet-900 truncate" title={formatCurrency(kpis.fondos_retenidos)}>
+                {formatCurrency(kpis.fondos_retenidos)}
+              </p>
+              <p className="text-[11px] text-slate-500">Dinero de clientes aún bajo resguardo</p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white border border-emerald-200 shadow-sm space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Utilidad PRAVIA</span>
+              <p className="text-xl font-black text-emerald-900 truncate" title={formatCurrency(kpis.utilidad_pravia)}>
+                {formatCurrency(kpis.utilidad_pravia)}
+              </p>
+              <p className="text-[11px] text-slate-500">Honorarios recibidos menos gastos internos</p>
             </div>
 
             {/* 2. Honorarios Generados */}

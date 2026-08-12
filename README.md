@@ -1,12 +1,66 @@
-# Pravia
+# PRAVIA OS
 
-PRAVIA OS es una aplicación para la administración de prospectos, cotizaciones, expedientes, comparecientes, documentos y operaciones financieras notariales.
+Sistema operativo jurídico-notarial para prospectos, cotizaciones, expedientes, comparecientes, documentos, proyectos de escritura, finanzas, agenda, cumplimiento e inteligencia documental.
 
-## Estructura
+## Componentes
 
-- `frontend`: aplicación web React y TypeScript.
-- `backend`: API Node.js, TypeScript, Prisma, PostgreSQL/Supabase e integración con OpenAI.
+- `frontend`: React, TypeScript, Vite y PWA instalable.
+- `backend`: Node.js, Express, TypeScript, Prisma y PostgreSQL 17.
+- `backend/prisma/migrations`: historial incremental; no usar `db push` ni reset sobre la base existente.
+- `docs`: auditorías, decisiones de negocio, seguridad, operación y arquitectura.
 
-## Configuración
+## Inicio local de desarrollo
 
-Las variables privadas se configuran en archivos `.env` locales. Usa los archivos `.env.example` como referencia y nunca publiques claves de API o credenciales.
+1. Copia los `.env.example` de backend y frontend a archivos `.env` privados.
+2. Configura URLs, Supabase Storage y `AUTH_JWT_SECRET` de al menos 32 caracteres.
+3. Instala dependencias con `npm ci` en `backend` y `frontend`.
+4. Comprueba configuración con `npm run check:env` y acceso con `npm run db:verify`.
+5. Inicia backend y frontend con `npm run dev` en cada carpeta.
+
+La cuenta heredada debe activarse deliberadamente con `npm run auth:set-password`; el comando exige correo/contraseña mediante variables privadas y nunca imprime la contraseña.
+
+## Calidad
+
+Backend:
+
+```text
+npm run build
+npm test
+npm run test:integration
+npm run db:verify
+npm run storage:verify
+npm run db:init-empty
+npm run eval:ai
+npm run check:secrets
+```
+
+Frontend:
+
+```text
+npm run build
+npm run check:bundle
+npm run check:pwa
+npm run e2e:smoke
+```
+
+## Infraestructura
+
+`PRAVIA_DATABASE_MODE` y `STORAGE_MODE` aceptan `cloud`, `local` o `hybrid`. El modo híbrido exige primarios explícitos y no habilita replicación. Consulta [la guía cloud/local/hybrid](docs/arquitectura/fase-12-cloud-local-hybrid.md) antes de cambiar infraestructura.
+
+## Seguridad operativa
+
+- No publicar `.env`, claves de Supabase/OpenAI ni respaldos.
+- No ejecutar `prisma db push`, `prisma migrate reset` ni restaurar sobre una base con datos.
+- Las tablas públicas heredadas tienen RLS y denegación explícita para Data API.
+- Los documentos son privados y se entregan mediante enlaces temporales o streaming autorizado.
+- La IA propone y explica; una persona confirma los datos y decisiones jurídicas/fiscales.
+
+La matriz y el procedimiento completos están en [autenticación, RBAC y RLS](docs/seguridad/fase-10-auth-rbac-rls.md).
+
+## Producción
+
+La imagen del backend, la imagen PWA/Nginx y una composición cloud de referencia están incluidas. Las migraciones se ejecutan como paso de mantenimiento explícito y nunca mediante `db push`. Consulta [calidad y gates de Fase 13](docs/calidad/fase-13-testing-produccion.md), [el runbook de despliegue](docs/operacion/despliegue-produccion.md) y [la matriz de cierre](docs/auditoria/matriz-cierre-prompt-maestro.md).
+
+El recorrido E2E mutante se niega a usar la base actual: solo se habilita con `E2E_ALLOW_MUTATIONS=isolated-database-confirmed` en localhost o una rama efímera declarada.
+
+Una instalación nueva puede usar `db:init-empty` únicamente sobre PostgreSQL vacío y con confirmación explícita. Actualizaciones de la instalación vigente siempre usan migraciones aditivas; nunca `db push` ni reset.

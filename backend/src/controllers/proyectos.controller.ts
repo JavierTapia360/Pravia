@@ -7,11 +7,12 @@ import mammoth from 'mammoth';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType } from 'docx';
 import Docxtemplater from 'docxtemplater';
 import PizZip from 'pizzip';
-import { PrismaClient } from '@prisma/client';
-import { downloadFile } from '../services/supabase.service';
+import { Prisma } from '@prisma/client';
+import { deleteFile, downloadFile, uploadFile } from '../services/supabase.service';
 import { analizarProyectoNotarialConOpenAI, DocumentoParaExtraccion } from '../services/openaiDocument.service';
-
-const prisma = new PrismaClient();
+import { getOpenAIEscalationModelName } from '../services/openaiDocument.service';
+import { recordAIFailure, recordAIUsages } from '../services/aiUsage.service';
+import prisma from '../config/prisma';
 
 const PROYECTOS_DIR = path.join(__dirname, '../../uploads/proyectos');
 const REPORTES_DIR = path.join(__dirname, '../../uploads/reportes_ia');
@@ -21,18 +22,8 @@ if (!fs.existsSync(PROYECTOS_DIR)) fs.mkdirSync(PROYECTOS_DIR, { recursive: true
 if (!fs.existsSync(REPORTES_DIR)) fs.mkdirSync(REPORTES_DIR, { recursive: true });
 if (!fs.existsSync(DOCS_DIR)) fs.mkdirSync(DOCS_DIR, { recursive: true });
 
-// Multer Storage for Proyectos
-const storageProyectos = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, PROYECTOS_DIR),
-  filename: (_req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, `proyecto_${uniqueSuffix}${ext}`);
-  }
-});
-
 export const uploadProyectoMulter = multer({
-  storage: storageProyectos,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 }
 });
 
@@ -50,6 +41,7 @@ interface ProyectoVersionRecord {
   nota_version?: string;
   cargado_por_nombre: string;
   created_at: string;
+  storage_backend?: 'SUPABASE' | 'LOCAL_LEGACY';
 }
 
 interface IAReportRecord {
@@ -94,13 +86,66 @@ function saveProyectosState(state: { versiones: ProyectoVersionRecord[]; reporte
   fs.writeFileSync(proyectosDBPath, JSON.stringify(state, null, 2), 'utf8');
 }
 
+const projectMeta = (document: any) => {
+  const metadata = document.datos_extraidos;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
+  const value = (metadata as any).proyecto;
+  return value && typeof value === 'object' ? value : {};
+};
+
+const mapDocumentProjectVersion = (document: any): ProyectoVersionRecord => {
+  const meta = projectMeta(document);
+  const link = document.expedienteVinculos?.[0];
+  return {
+    id: document.id,
+    expediente_id: document.expediente_id,
+    version_numero: Number(meta.version_numero || 1),
+    nombre_original: document.nombre_original,
+    archivo_file: document.storage_key,
+    mime_type: document.mime_type,
+    size_bytes: document.size_bytes,
+    es_vigente: link?.estatus === 'ACTIVO',
+    es_version_final: Boolean(meta.es_version_final),
+    nota_version: meta.nota_version || document.observaciones || undefined,
+    cargado_por_nombre: document.subido_por ? `${document.subido_por.nombre} ${document.subido_por.apellido}` : 'Usuario PRAVIA',
+    created_at: new Date(document.fecha_carga).toISOString(),
+    storage_backend: 'SUPABASE',
+  };
+};
+
+async function loadDatabaseProjectVersions(expedienteId: string) {
+  const documents = await prisma.documento.findMany({
+    where: { expediente_id: expedienteId, tipo: 'PROYECTO_ESCRITURA' },
+    include: {
+      subido_por: { select: { nombre: true, apellido: true } },
+      expedienteVinculos: {
+        where: { expediente_id: expedienteId, tipo_vinculo: 'PROYECTO_ESCRITURA' },
+        orderBy: { fecha_vinculo: 'desc' },
+      },
+    },
+    orderBy: { fecha_carga: 'desc' },
+  });
+  return documents.map(mapDocumentProjectVersion).sort((a, b) => b.version_numero - a.version_numero);
+}
+
+async function loadProjectVersionBuffer(version: ProyectoVersionRecord) {
+  if (version.storage_backend === 'SUPABASE') return downloadFile(version.archivo_file);
+  const legacyPath = path.join(PROYECTOS_DIR, version.archivo_file);
+  if (!fs.existsSync(legacyPath)) throw new Error('El archivo físico del proyecto no existe en almacenamiento');
+  return fs.readFileSync(legacyPath);
+}
+
 // 1. GET Proyecto State for Expediente
 export const getProyectoEscritura = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const state = loadProyectosState();
-
-    const expVersiones = state.versiones.filter(v => v.expediente_id === id);
+    const databaseVersions = await loadDatabaseProjectVersions(id);
+    const legacyVersions = state.versiones
+      .filter(v => v.expediente_id === id)
+      .map(version => ({ ...version, storage_backend: 'LOCAL_LEGACY' as const }));
+    const expVersiones = [...databaseVersions, ...legacyVersions]
+      .sort((a, b) => b.version_numero - a.version_numero);
     const vigente = expVersiones.find(v => v.es_vigente) || expVersiones[0] || null;
     const historial = expVersiones
       .filter(v => !vigente || v.id !== vigente.id)
@@ -121,6 +166,7 @@ export const getProyectoEscritura = async (req: Request, res: Response) => {
 
 // 2. POST Upload New Proyecto Version
 export const uploadProyectoVersion = async (req: Request, res: Response) => {
+  let uploadedStorageKey: string | null = null;
   try {
     const { id } = req.params;
     const file = req.file;
@@ -131,70 +177,100 @@ export const uploadProyectoVersion = async (req: Request, res: Response) => {
 
     const docxMime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     if (path.extname(file.originalname).toLowerCase() !== '.docx' || file.mimetype !== docxMime) {
-      if (file.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
       return res.status(400).json({
         error: 'Formato de proyecto no válido',
         detail: 'La nueva versión debe ser un archivo .docx real.'
       });
     }
 
-    let userId = (req as any).user?.id || req.body.usuario_id;
-    let userName = 'Usuario Sistema';
+    const userId = (req as any).user?.id || req.body.usuario_id;
+    if (!userId) return res.status(401).json({ error: 'Usuario autenticado requerido para cargar una versión.' });
+    const [user, expediente] = await Promise.all([
+      prisma.user.findFirst({ where: { id: userId, activo: true }, select: { id: true, nombre: true, apellido: true } }),
+      prisma.expediente.findFirst({ where: { id, archived_at: null }, select: { id: true } }),
+    ]);
+    if (!user) return res.status(403).json({ error: 'El usuario no existe o está inactivo.' });
+    if (!expediente) return res.status(404).json({ error: 'Expediente no encontrado o archivado.' });
 
-    if (userId) {
-      const u = await prisma.user.findUnique({ where: { id: userId } });
-      if (u) userName = `${u.nombre} ${u.apellido}`;
-    } else {
-      const u = await prisma.user.findFirst();
-      if (u) {
-        userId = u.id;
-        userName = `${u.nombre} ${u.apellido}`;
-      }
-    }
+    const safeName = path.basename(file.originalname).replace(/[^a-zA-Z0-9_.-]/g, '_');
+    uploadedStorageKey = `expedientes/${id}/proyectos/${crypto.randomUUID()}_${safeName}`;
+    await uploadFile(file.buffer, uploadedStorageKey, file.mimetype);
 
-    const state = loadProyectosState();
-    const expVersiones = state.versiones.filter(v => v.expediente_id === id);
-    const maxVersion = expVersiones.reduce((max, v) => Math.max(max, v.version_numero), 0);
-    const newVersionNum = maxVersion + 1;
+    const createdDocument = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:proyecto-version:${id}`}))`);
+      const existing = await tx.documento.findMany({
+        where: { expediente_id: id, tipo: 'PROYECTO_ESCRITURA' },
+        select: { datos_extraidos: true },
+      });
+      const legacy = loadProyectosState().versiones.filter(version => version.expediente_id === id);
+      const maxVersion = [...existing.map(projectMeta), ...legacy]
+        .reduce((max, metadata: any) => Math.max(max, Number(metadata.version_numero || 0)), 0);
+      const newVersionNum = maxVersion + 1;
 
-    // Mark previous as non-vigente
-    state.versiones.forEach(v => {
-      if (v.expediente_id === id) v.es_vigente = false;
-    });
+      await tx.expedienteDocumento.updateMany({
+        where: { expediente_id: id, tipo_vinculo: 'PROYECTO_ESCRITURA', estatus: 'ACTIVO' },
+        data: { estatus: 'SUSTITUIDO', inactivado_at: new Date(), inactivado_por_id: user.id, motivo_inactivacion: `Sustituido por V${newVersionNum}` },
+      });
 
-    const newVersion: ProyectoVersionRecord = {
-      id: `ver_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      expediente_id: id,
-      version_numero: newVersionNum,
-      nombre_original: `V${newVersionNum} — ${file.originalname}`,
-      archivo_file: file.filename,
-      mime_type: file.mimetype,
-      size_bytes: file.size,
-      es_vigente: true,
-      es_version_final: false,
-      nota_version: req.body.nota_version || `Cargada versión V${newVersionNum}`,
-      cargado_por_nombre: userName,
-      created_at: new Date().toISOString()
-    };
-
-    state.versiones.push(newVersion);
-    saveProyectosState(state);
-
-    // Audit activity
-    if (userId) {
-      await prisma.expedienteActividad.create({
+      const document = await tx.documento.create({
+        data: {
+          nombre_original: `V${newVersionNum} — ${file.originalname}`,
+          nombre_interno: uploadedStorageKey!,
+          storage_key: uploadedStorageKey!,
+          tipo: 'PROYECTO_ESCRITURA',
+          categoria: 'PROYECTO',
+          mime_type: file.mimetype,
+          size_bytes: file.size,
+          subido_por_id: user.id,
+          expediente_id: id,
+          estatus: 'VIGENTE',
+          observaciones: req.body.nota_version?.trim() || `Versión V${newVersionNum}`,
+          datos_extraidos: {
+            proyecto: {
+              version_numero: newVersionNum,
+              es_version_final: false,
+              nota_version: req.body.nota_version?.trim() || `Versión V${newVersionNum}`,
+            }
+          },
+        }
+      });
+      await tx.expedienteDocumento.create({
+        data: {
+          expediente_id: id,
+          documento_id: document.id,
+          tipo_vinculo: 'PROYECTO_ESCRITURA',
+          creado_por_id: user.id,
+          estatus: 'ACTIVO',
+          observaciones: `Proyecto vigente V${newVersionNum}`,
+        }
+      });
+      await tx.expedienteActividad.create({
         data: {
           expediente_id: id,
           tipo: 'DOCUMENTO',
-          titulo: `Nueva Versión de Proyecto Cargada (V${newVersionNum})`,
+          titulo: `Nueva versión de proyecto cargada (V${newVersionNum})`,
           descripcion: `Archivo: "${file.originalname}" (${(file.size / 1024).toFixed(1)} KB)`,
-          usuario_id: userId
+          usuario_id: user.id,
         }
       });
-    }
+      await tx.auditLog.create({
+        data: {
+          user_id: user.id,
+          accion: 'UPLOAD_PROYECTO_VERSION',
+          entidad: 'Expediente',
+          entidad_id: id,
+          valores_nuevos: { documento_id: document.id, version: newVersionNum, storage_key: uploadedStorageKey },
+          correlation_id: (req as any).correlationId,
+        }
+      });
+      return document;
+    });
 
+    uploadedStorageKey = null;
+    const [newVersion] = await loadDatabaseProjectVersions(id).then(versions => versions.filter(version => version.id === createdDocument.id));
     res.status(201).json(newVersion);
   } catch (error: any) {
+    if (uploadedStorageKey) await deleteFile(uploadedStorageKey).catch(() => undefined);
     res.status(500).json({ error: 'Error al cargar versión de proyecto', detail: error.message });
   }
 };
@@ -203,7 +279,61 @@ export const uploadProyectoVersion = async (req: Request, res: Response) => {
 export const updateProyectoVersion = async (req: Request, res: Response) => {
   try {
     const { id, versionId } = req.params;
-    const { accion, nuevo_nombre, nota_version } = req.body;
+    const { accion, nuevo_nombre, nota_version, usuario_id } = req.body;
+
+    const databaseDocument = await prisma.documento.findFirst({
+      where: { id: versionId, expediente_id: id, tipo: 'PROYECTO_ESCRITURA' },
+      include: {
+        subido_por: { select: { nombre: true, apellido: true } },
+        expedienteVinculos: { where: { expediente_id: id, tipo_vinculo: 'PROYECTO_ESCRITURA' } },
+      }
+    });
+    if (databaseDocument) {
+      const actorId = (req as any).user?.id || usuario_id || databaseDocument.subido_por_id;
+      const actor = await prisma.user.findFirst({ where: { id: actorId, activo: true }, select: { id: true } });
+      if (!actor) return res.status(403).json({ error: 'Usuario activo requerido para actualizar el proyecto.' });
+      const currentMeta = projectMeta(databaseDocument);
+
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`pravia:proyecto-version:${id}`}))`);
+        if (accion === 'RESTAURAR_VIGENTE') {
+          await tx.expedienteDocumento.updateMany({
+            where: { expediente_id: id, tipo_vinculo: 'PROYECTO_ESCRITURA', estatus: 'ACTIVO' },
+            data: { estatus: 'SUSTITUIDO', inactivado_at: new Date(), inactivado_por_id: actor.id, motivo_inactivacion: `Restaurada versión ${currentMeta.version_numero || ''}` },
+          });
+          await tx.expedienteDocumento.updateMany({
+            where: { expediente_id: id, documento_id: versionId, tipo_vinculo: 'PROYECTO_ESCRITURA' },
+            data: { estatus: 'ACTIVO', inactivado_at: null, inactivado_por_id: null, motivo_inactivacion: null },
+          });
+        }
+
+        const nextMeta = {
+          ...currentMeta,
+          es_version_final: accion === 'MARCAR_FINAL' ? true : Boolean(currentMeta.es_version_final),
+          nota_version: nota_version?.trim() || currentMeta.nota_version,
+        };
+        await tx.documento.update({
+          where: { id: versionId },
+          data: {
+            nombre_original: accion === 'RENOMBRAR' && nuevo_nombre?.trim() ? nuevo_nombre.trim() : databaseDocument.nombre_original,
+            observaciones: nota_version?.trim() || databaseDocument.observaciones,
+            datos_extraidos: { proyecto: nextMeta },
+          }
+        });
+        await tx.expedienteActividad.create({
+          data: {
+            expediente_id: id,
+            usuario_id: actor.id,
+            tipo: 'DOCUMENTO',
+            titulo: accion === 'RESTAURAR_VIGENTE' ? `Proyecto V${currentMeta.version_numero || ''} restaurado` : 'Metadatos del proyecto actualizados',
+            descripcion: nota_version?.trim() || accion,
+          }
+        });
+      });
+
+      const [updated] = (await loadDatabaseProjectVersions(id)).filter(version => version.id === versionId);
+      return res.json(updated);
+    }
 
     const state = loadProyectosState();
     const version = state.versiones.find(v => v.id === versionId && v.expediente_id === id);
@@ -233,6 +363,13 @@ export const updateProyectoVersion = async (req: Request, res: Response) => {
 export const streamProyectoVersion = async (req: Request, res: Response) => {
   try {
     const { id, versionId } = req.params;
+    const databaseVersion = (await loadDatabaseProjectVersions(id)).find(version => version.id === versionId);
+    if (databaseVersion) {
+      const buffer = await loadProjectVersionBuffer(databaseVersion);
+      res.setHeader('Content-Type', databaseVersion.mime_type);
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(databaseVersion.nombre_original)}"`);
+      return res.send(buffer);
+    }
     const state = loadProyectosState();
     const version = state.versiones.find(v => v.id === versionId && v.expediente_id === id);
 
@@ -254,6 +391,13 @@ export const streamProyectoVersion = async (req: Request, res: Response) => {
 export const downloadProyectoVersion = async (req: Request, res: Response) => {
   try {
     const { id, versionId } = req.params;
+    const databaseVersion = (await loadDatabaseProjectVersions(id)).find(version => version.id === versionId);
+    if (databaseVersion) {
+      const buffer = await loadProjectVersionBuffer(databaseVersion);
+      res.setHeader('Content-Type', databaseVersion.mime_type);
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(databaseVersion.nombre_original)}"`);
+      return res.send(buffer);
+    }
     const state = loadProyectosState();
     const version = state.versiones.find(v => v.id === versionId && v.expediente_id === id);
 
@@ -276,11 +420,15 @@ export const downloadProyectoVersion = async (req: Request, res: Response) => {
 
 // 6. ANALIZAR CON IA & GENERAR REPORTE WORD (.docx)
 export const analizarProyectoConIA = async (req: Request, res: Response) => {
+  const aiStartedAt = Date.now();
+  let aiRequestStarted = false;
+  let usageUserId: string | undefined;
   try {
     const { id } = req.params;
 
     let userId = (req as any).user?.id || req.body.usuario_id;
-    let userName = 'Javier Concordia';
+    usageUserId = userId;
+    let userName = 'Usuario no identificado';
 
     if (userId) {
       const u = await prisma.user.findUnique({ where: { id: userId } });
@@ -303,7 +451,11 @@ export const analizarProyectoConIA = async (req: Request, res: Response) => {
     if (!exp) return res.status(404).json({ error: 'Expediente no encontrado' });
 
     const state = loadProyectosState();
-    const expVersiones = state.versiones.filter(v => v.expediente_id === id);
+    const databaseVersions = await loadDatabaseProjectVersions(id);
+    const expVersiones = [
+      ...databaseVersions,
+      ...state.versiones.filter(v => v.expediente_id === id).map(version => ({ ...version, storage_backend: 'LOCAL_LEGACY' as const })),
+    ].sort((a, b) => b.version_numero - a.version_numero);
     const vigente = expVersiones.find(v => v.es_vigente) || expVersiones[0];
 
     if (!vigente) {
@@ -317,10 +469,7 @@ export const analizarProyectoConIA = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Se requiere al menos un documento activo cargado en el expediente' });
     }
 
-    const projectPath = path.join(PROYECTOS_DIR, vigente.archivo_file);
-    if (!fs.existsSync(projectPath)) {
-      return res.status(400).json({ error: 'El archivo físico del proyecto vigente no existe' });
-    }
+    const projectBuffer = await loadProjectVersionBuffer(vigente);
 
     const documentosParaIA: DocumentoParaExtraccion[] = [];
     const documentosNoDescargados: string[] = [];
@@ -348,9 +497,10 @@ export const analizarProyectoConIA = async (req: Request, res: Response) => {
       });
     }
 
+    aiRequestStarted = true;
     const resultadoIA = await analizarProyectoNotarialConOpenAI(
       {
-        buffer: fs.readFileSync(projectPath),
+        buffer: projectBuffer,
         mimeType: vigente.mime_type,
         tipoDocumento: 'PROYECTO_ESCRITURA',
         documentoId: vigente.id,
@@ -358,6 +508,14 @@ export const analizarProyectoConIA = async (req: Request, res: Response) => {
       },
       documentosParaIA
     );
+    await recordAIUsages(resultadoIA.uso ? [resultadoIA.uso] : [], {
+      operacion: 'REVISION_PROYECTO_ESCRITURA',
+      usuarioId: userId,
+      expedienteId: id,
+      escalamientoMotivo: 'Revisión jurídica documental compleja',
+      metadata: { proyecto_version_id: vigente.id, documentos_fuente: documentosParaIA.map((item) => item.documentoId) },
+    }).catch((usageError) => console.error('[AI usage] No fue posible registrar el consumo:', usageError.message));
+    aiRequestStarted = false;
 
     const observaciones = resultadoIA.observaciones.map((observacion, index) => ({
       id: `obs_${index + 1}`,
@@ -521,6 +679,16 @@ export const analizarProyectoConIA = async (req: Request, res: Response) => {
 
     res.status(201).json(reportRecord);
   } catch (error: any) {
+    if (aiRequestStarted) {
+      await recordAIFailure({
+        operacion: 'REVISION_PROYECTO_ESCRITURA',
+        modelo: getOpenAIEscalationModelName(),
+        usuarioId: usageUserId,
+        expedienteId: req.params.id,
+        durationMs: Date.now() - aiStartedAt,
+        errorCode: error.code || 'AI_PROJECT_REVIEW_FAILED',
+      }).catch(() => undefined);
+    }
     res.status(500).json({ error: 'Error al ejecutar análisis de IA', detail: error.message });
   }
 };

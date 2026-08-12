@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
 
 interface ModalProps {
@@ -11,21 +11,39 @@ interface ModalProps {
 }
 
 export function Modal({ isOpen, onClose, title, children, footer, maxWidth = '500px' }: ModalProps) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.setTimeout(() => dialogRef.current?.focus(), 0);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
-    <div style={{
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} style={{
       position: 'fixed',
       top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: 'rgba(0, 0, 0, 0.5)',
-      backdropFilter: 'blur(4px)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       zIndex: 1000,
       padding: 'var(--space-4)'
     }}>
-      <div className="glass-card fade-in" style={{ 
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="glass-card fade-in" style={{
         width: '100%', 
         maxWidth, 
         padding: 0, 
@@ -42,8 +60,8 @@ export function Modal({ isOpen, onClose, title, children, footer, maxWidth = '50
           justifyContent: 'space-between',
           alignItems: 'center'
         }}>
-          <h2 style={{ fontSize: '1.25rem', margin: 0 }}>{title}</h2>
-          <button onClick={onClose} className="btn-icon">
+          <h2 id={titleId} style={{ fontSize: '1.25rem', margin: 0 }}>{title}</h2>
+          <button type="button" onClick={onClose} className="btn-icon" aria-label={`Cerrar ${title}`}>
             <X size={20} />
           </button>
         </div>
