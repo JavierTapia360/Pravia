@@ -172,7 +172,7 @@ export default function ComparecienteDetail() {
     : archivoDocs.filter((d) => (d.categoria || '').toUpperCase().includes(carpetaSeleccionada.toUpperCase()));
 
   return (
-    <div className="p-6 md:p-8 space-y-8 max-w-7xl mx-auto">
+    <div className="module-page compareciente-detail-page">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>

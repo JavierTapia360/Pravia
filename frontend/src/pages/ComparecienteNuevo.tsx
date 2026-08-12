@@ -960,7 +960,7 @@ export default function ComparecienteNuevo() {
   const nombreCompletoCalculado = `${nombre} ${apellidoPaterno} ${apellidoMaterno}`.trim();
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 p-6 lg:p-10 space-y-8">
+    <div className="module-page light-module-migration compareciente-editor-page">
       {/* Header Notarial */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div>

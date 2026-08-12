@@ -87,7 +87,7 @@ export default function WizardCotizacion({ isOpen, onClose, onSuccess, initialPr
     (currentStep === 2 && !selectedNotaria);
 
   return createPortal(
-    <div style={{
+    <div className="quote-wizard-backdrop" style={{
       position: 'fixed',
       top: 0, left: 0, right: 0, bottom: 0,
       width: '100vw',
@@ -100,7 +100,7 @@ export default function WizardCotizacion({ isOpen, onClose, onSuccess, initialPr
       justifyContent: 'center',
       padding: '24px'
     }}>
-      <div style={{
+      <div className="quote-wizard-dialog" style={{
         width: 'min(1140px, calc(100vw - 48px))',
         height: 'min(780px, calc(100vh - 48px))',
         maxWidth: '1140px',
@@ -146,7 +146,7 @@ export default function WizardCotizacion({ isOpen, onClose, onSuccess, initialPr
           background: 'var(--bg-primary)',
           flexShrink: 0
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
+          <div className="quote-wizard-steps" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
             {steps.map((step) => {
               const Icon = step.icon;
               const isActive = currentStep === step.id;
@@ -319,7 +319,7 @@ function Step1Prospecto({ selected, onSelect, initialProspectoId }: { selected: 
   });
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 'var(--space-6)', height: '100%' }}>
+    <div className="quote-wizard-two-column" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 'var(--space-6)', height: '100%' }}>
       
       {/* Panel Izquierdo — Lista y Buscador */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', minWidth: 0 }}>
@@ -534,7 +534,7 @@ function Step2Notaria({ selected, onSelect }: { selected: any, onSelect: (n: any
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 'var(--space-6)', height: '100%' }}>
+    <div className="quote-wizard-two-column" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 'var(--space-6)', height: '100%' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', minWidth: 0 }}>
         
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

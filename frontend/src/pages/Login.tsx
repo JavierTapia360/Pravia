@@ -29,32 +29,25 @@ export default function Login() {
   };
 
   return (
-    <div style={{ 
-      minHeight: '100vh', 
-      display: 'flex', 
-      alignItems: 'center', 
-      justifyContent: 'center',
-      background: 'var(--bg-primary)',
-      backgroundImage: 'radial-gradient(circle at top right, rgba(99, 102, 241, 0.1), transparent 40%), radial-gradient(circle at bottom left, rgba(6, 182, 212, 0.1), transparent 40%)'
-    }}>
-      <div className="glass-card" style={{ width: '100%', maxWidth: '420px', padding: 'var(--space-8)' }}>
-        <div style={{ textAlign: 'center', marginBottom: 'var(--space-8)' }}>
-          <h1 style={{ fontSize: '2.5rem', marginBottom: 'var(--space-2)' }}>
-            PRAVIA <span style={{ color: 'var(--color-primary)' }}>OS</span>
+    <main className="auth-page">
+      <section className="surface-card auth-card" aria-labelledby="login-title">
+        <div className="auth-brand">
+          <span className="auth-brand__mark">P</span>
+          <h1 id="login-title" className="auth-brand__name">
+            PRAVIA <span>OS</span>
           </h1>
-          <p className="text-muted">Sistema Operativo Jurídico-Notarial</p>
+          <p>Sistema Operativo Jurídico-Notarial</p>
         </div>
 
         <form onSubmit={handleLogin}>
           <div className="input-group">
             <label className="input-label" htmlFor="login-email">Correo electrónico</label>
-            <div style={{ position: 'relative' }}>
-              <User size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <div className="auth-input">
+              <User size={18} aria-hidden="true" />
               <input 
                 id="login-email"
                 type="email"
                 className="input-field" 
-                style={{ paddingLeft: '40px' }}
                 placeholder="nombre@despacho.mx"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -66,13 +59,12 @@ export default function Login() {
 
           <div className="input-group">
             <label className="input-label" htmlFor="login-password">Contraseña</label>
-            <div style={{ position: 'relative' }}>
-              <Lock size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <div className="auth-input">
+              <Lock size={18} aria-hidden="true" />
               <input 
                 id="login-password"
                 type="password" 
                 className="input-field" 
-                style={{ paddingLeft: '40px' }}
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -84,23 +76,22 @@ export default function Login() {
 
           <button 
             type="submit" 
-            className="btn btn-primary" 
-            style={{ width: '100%', marginTop: 'var(--space-4)', height: '44px' }}
+            className="btn btn-primary auth-submit"
             disabled={isLoading || !email || !password}
           >
-            {isLoading ? 'Autenticando...' : 'Iniciar Sesión'}
+            {isLoading ? 'Autenticando…' : 'Iniciar sesión'}
           </button>
         </form>
 
-        {error && <p role="alert" style={{ marginTop: 'var(--space-4)', color: 'var(--color-danger)', fontSize: '0.9rem' }}>{error}</p>}
+        {error && <p role="alert" className="form-alert">{error}</p>}
 
-        <div style={{ marginTop: 'var(--space-6)', textAlign: 'center' }}>
-          <Link to="/recuperar-acceso" style={{ display: 'inline-block', marginBottom: 'var(--space-3)' }}>¿Olvidaste tu contraseña?</Link>
-          <p className="text-muted" style={{ fontSize: '0.85rem' }}>
+        <div className="auth-footer">
+          <Link to="/recuperar-acceso">¿Olvidaste tu contraseña?</Link>
+          <p>
             Acceso restringido. Si no tiene cuenta o necesita recuperar el acceso, contacte a Dirección.
           </p>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }

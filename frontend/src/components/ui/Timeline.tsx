@@ -16,46 +16,35 @@ interface TimelineProps {
 
 export function Timeline({ events }: TimelineProps) {
   if (events.length === 0) {
-    return <div className="text-muted" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>No hay eventos registrados.</div>;
+    return <div className="timeline-empty">No hay eventos registrados.</div>;
   }
 
   return (
-    <div style={{ padding: 'var(--space-4) 0' }}>
+    <div className="timeline">
       {events.map((event, index) => {
         const isLast = index === events.length - 1;
         
         return (
-          <div key={event.id} style={{ display: 'flex', gap: 'var(--space-4)', minHeight: '80px' }}>
+          <div key={event.id} className="timeline-item">
             {/* Timeline Line & Icon */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '32px' }}>
-              <div style={{ 
-                width: '32px', height: '32px', 
-                borderRadius: '50%', 
+            <div className="timeline-rail">
+              <div className="timeline-icon" style={{
                 background: `color-mix(in srgb, ${event.iconColor || 'var(--color-primary)'} 15%, transparent)`,
                 color: event.iconColor || 'var(--color-primary)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                flexShrink: 0,
-                zIndex: 2
               }}>
                 {event.icon}
               </div>
               {!isLast && (
-                <div style={{ 
-                  width: '2px', 
-                  flex: 1, 
-                  background: 'var(--border-color)',
-                  marginTop: '4px',
-                  marginBottom: '4px'
-                }} />
+                <div className="timeline-line" />
               )}
             </div>
 
             {/* Content */}
-            <div style={{ flex: 1, paddingBottom: isLast ? 0 : 'var(--space-6)', marginTop: '4px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-4)' }}>
+            <div className={`timeline-content ${isLast ? 'timeline-content--last' : ''}`}>
+              <div className="timeline-heading">
                 <div>
-                  <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>{event.title}</h4>
-                  <div className="text-muted" style={{ fontSize: '0.8rem', marginTop: '2px', marginBottom: 'var(--space-2)' }}>
+                  <h4>{event.title}</h4>
+                  <div className="timeline-date">
                     {event.date}
                   </div>
                 </div>
@@ -63,13 +52,7 @@ export function Timeline({ events }: TimelineProps) {
               </div>
               
               {event.description && (
-                <div style={{ 
-                  background: 'var(--bg-tertiary)', 
-                  padding: 'var(--space-3)', 
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: '0.9rem',
-                  color: 'var(--text-secondary)'
-                }}>
+                <div className="timeline-description">
                   {event.description}
                 </div>
               )}

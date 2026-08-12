@@ -943,10 +943,10 @@ export default function ExpedienteDetail() {
   });
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-full mx-auto fade-in">
+    <div className="module-page light-module-migration expediente-detail-page fade-in">
       
       {/* TOP NAVIGATION LINK WITH DIRTY WARNING */}
-      <div className="flex items-center justify-between pb-3 border-b border-white/10">
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200">
         <button
           type="button"
           onClick={() => handleSafeNavigation('/expedientes')}

@@ -33,7 +33,7 @@ export default function ChangePassword() {
   };
 
   return <main className="auth-page">
-    <section className="glass-card auth-card" aria-labelledby="change-password-title">
+    <section className="surface-card auth-card" aria-labelledby="change-password-title">
       <div className="auth-icon"><KeyRound size={24} /></div>
       <p className="eyebrow">Protección de la cuenta</p>
       <h1 id="change-password-title">Crea tu contraseña definitiva</h1>
@@ -41,12 +41,12 @@ export default function ChangePassword() {
       <form onSubmit={submit}>
         <label className="input-label" htmlFor="current-password">Contraseña temporal</label>
         <input id="current-password" className="input-field" type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required />
-        <label className="input-label" htmlFor="new-password" style={{ marginTop: 'var(--space-4)' }}>Nueva contraseña</label>
+        <label className="input-label modal-field" htmlFor="new-password">Nueva contraseña</label>
         <input id="new-password" className="input-field" type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required minLength={12} />
-        <label className="input-label" htmlFor="confirm-password" style={{ marginTop: 'var(--space-4)' }}>Confirmar contraseña</label>
+        <label className="input-label modal-field" htmlFor="confirm-password">Confirmar contraseña</label>
         <input id="confirm-password" className="input-field" type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required minLength={12} />
-        {error && <p role="alert" style={{ color: 'var(--color-danger)', marginTop: 'var(--space-4)' }}>{error}</p>}
-        <button className="btn btn-primary" type="submit" disabled={loading} style={{ width: '100%', marginTop: 'var(--space-5)' }}>{loading ? 'Guardando…' : 'Guardar contraseña'}</button>
+        {error && <p role="alert" className="form-alert">{error}</p>}
+        <button className="btn btn-primary auth-submit" type="submit" disabled={loading}>{loading ? 'Guardando…' : 'Guardar contraseña'}</button>
       </form>
     </section>
   </main>;

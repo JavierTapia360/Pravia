@@ -10,6 +10,8 @@ import {
   AlertTriangle,
   CheckCircle2, 
   ChevronRight,
+  FolderOpen,
+  MapPin,
   X
 } from 'lucide-react';
 import { comparecientesService, calcularCalidadInformacion } from '../services/comparecientes.service';
@@ -365,8 +367,9 @@ export default function Comparecientes() {
 
                   {/* Domicilio */}
                   {c.domicilios?.[0] && (
-                    <p className="mt-2.5 text-xs text-slate-600 line-clamp-1">
-                      📍 {c.domicilios[0].calle} {c.domicilios[0].exterior}, {c.domicilios[0].colonia}
+                    <p className="mt-2.5 flex items-center gap-1.5 text-[13px] text-slate-600 line-clamp-1">
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-amber-700" aria-hidden="true" />
+                      {c.domicilios[0].calle} {c.domicilios[0].exterior}, {c.domicilios[0].colonia}
                     </p>
                   )}
                 </div>
@@ -399,7 +402,7 @@ export default function Comparecientes() {
                   </div>
 
                   {/* Acciones de pie */}
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     {/* Botón archivar */}
                     <button
                       type="button"
@@ -415,13 +418,15 @@ export default function Comparecientes() {
                     </button>
 
                     {/* Enlace ficha */}
-                    <span
+                    <button
+                      type="button"
                       onClick={() => navigate(`/comparecientes/${c.id}`)}
-                      className="text-xs font-bold text-amber-700 group-hover:translate-x-0.5 transition-transform flex items-center gap-1 cursor-pointer"
+                      className="flex min-h-9 items-center gap-1.5 rounded-lg px-2 py-1 text-[13px] font-bold text-amber-800 transition-colors hover:bg-amber-50"
                     >
-                      📂 {expedientesCount} exp.
+                      <FolderOpen className="h-3.5 w-3.5" aria-hidden="true" />
+                      Ver perfil · {expedientesCount} exp.
                       <ChevronRight className="w-3.5 h-3.5" />
-                    </span>
+                    </button>
                   </div>
 
                 </div>

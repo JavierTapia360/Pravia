@@ -29,7 +29,7 @@ import { useAuthStore } from './stores/authStore';
 // Protected Route Wrapper
 const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
   const { status, user } = useAuthStore();
-  if (status === 'checking') return <div style={{ padding: 'var(--space-6)' }}><LoadingState label="Verificando sesión" rows={3} /></div>;
+  if (status === 'checking') return <div className="route-state"><LoadingState label="Verificando sesión" rows={3} /></div>;
   if (status !== 'authenticated') return <Navigate to="/login" replace />;
   if (user?.requires_password_change) return <Navigate to="/cambiar-contrasena" replace />;
   return children;
@@ -37,7 +37,7 @@ const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
 
 const AuthenticatedRoute = ({ children }: { children: JSX.Element }) => {
   const status = useAuthStore((state) => state.status);
-  if (status === 'checking') return <div style={{ padding: 'var(--space-6)' }}><LoadingState label="Verificando sesión" rows={3} /></div>;
+  if (status === 'checking') return <div className="route-state"><LoadingState label="Verificando sesión" rows={3} /></div>;
   return status === 'authenticated' ? children : <Navigate to="/login" replace />;
 };
 
@@ -56,7 +56,7 @@ function App() {
   return (
     <ErrorBoundary>
       <BrowserRouter>
-        <Suspense fallback={<div style={{ padding: 'var(--space-6)' }}><LoadingState label="Cargando módulo" rows={4} /></div>}>
+        <Suspense fallback={<div className="route-state"><LoadingState label="Cargando módulo" rows={4} /></div>}>
           <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/recuperar-acceso" element={<RecoverAccess />} />

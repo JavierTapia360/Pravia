@@ -39,21 +39,9 @@ export function SlideOver({ isOpen, onClose, title, children, width = '600px' }:
   if (!shouldRender) return null;
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0, left: 0, right: 0, bottom: 0,
-      zIndex: 900,
-      display: 'flex',
-      justifyContent: 'flex-end',
-      backgroundColor: isOpen ? 'rgba(0, 0, 0, 0.4)' : 'transparent',
-      transition: 'background-color 0.3s ease',
-      pointerEvents: isOpen ? 'auto' : 'none'
-    }}>
+    <div className={`slideover-shell ${isOpen ? 'slideover-shell--open' : ''}`}>
       {/* Backdrop for click outside */}
-      <div 
-        style={{ position: 'absolute', inset: 0 }} 
-        onClick={onClose}
-      />
+      <div className="slideover-backdrop" onClick={onClose} />
       
       {/* Panel */}
       <div 
@@ -64,34 +52,20 @@ export function SlideOver({ isOpen, onClose, title, children, width = '600px' }:
         tabIndex={-1}
         onAnimationEnd={onAnimationEnd}
         style={{
-          position: 'relative',
           width: '100%',
           maxWidth: width,
-          height: '100vh',
-          background: 'var(--bg-secondary)',
-          borderLeft: '1px solid var(--border-color)',
-          boxShadow: '-4px 0 24px rgba(0,0,0,0.2)',
-          display: 'flex',
-          flexDirection: 'column',
           transform: isOpen ? 'translateX(0)' : 'translateX(100%)',
-          transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         }}
+        className="slideover-panel"
       >
-        <div style={{ 
-          padding: 'var(--space-4) var(--space-6)', 
-          borderBottom: '1px solid var(--border-color)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          background: 'var(--bg-primary)'
-        }}>
-          <div id={titleId} style={{ fontSize: '1.25rem', fontWeight: 600 }}>{title}</div>
+        <div className="slideover-header">
+          <div id={titleId} className="slideover-title">{title}</div>
           <button type="button" onClick={onClose} className="btn-icon" aria-label="Cerrar panel">
             <X size={20} />
           </button>
         </div>
         
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div className="slideover-body">
           {children}
         </div>
       </div>
